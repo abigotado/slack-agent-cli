@@ -20,7 +20,7 @@ func (*fakeTTY) Close() error                        { return nil }
 
 func TestReadTokenTTYRestoresEchoAndDoesNotEchoSecret(t *testing.T) {
 	t.Parallel()
-	device := &fakeTTY{reader: strings.NewReader("xoxb-secret\n")}
+	device := &fakeTTY{reader: strings.NewReader("credential-sentinel\n")}
 	restored := false
 	token, err := readTokenTTY(device, func(fd int) (func() error, error) {
 		if fd != 7 {
@@ -31,7 +31,7 @@ func TestReadTokenTTYRestoresEchoAndDoesNotEchoSecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token != "xoxb-secret" || !restored {
+	if token != "credential-sentinel" || !restored {
 		t.Fatalf("token=%q restored=%v", token, restored)
 	}
 	if strings.Contains(device.output.String(), token) {
@@ -55,7 +55,7 @@ func TestReadTokenTTYRestoresEchoAfterInputFailure(t *testing.T) {
 
 func TestReadTokenTTYRestoreFailureClearsToken(t *testing.T) {
 	t.Parallel()
-	device := &fakeTTY{reader: strings.NewReader("xoxb-secret\n")}
+	device := &fakeTTY{reader: strings.NewReader("credential-sentinel\n")}
 	token, err := readTokenTTY(device, func(int) (func() error, error) {
 		return func() error { return errors.New("restore failed") }, nil
 	})
@@ -66,7 +66,7 @@ func TestReadTokenTTYRestoreFailureClearsToken(t *testing.T) {
 
 func TestReadTokenTTYMapsEchoFailureToUnavailable(t *testing.T) {
 	t.Parallel()
-	device := &fakeTTY{reader: strings.NewReader("xoxb-secret\n")}
+	device := &fakeTTY{reader: strings.NewReader("credential-sentinel\n")}
 	_, err := readTokenTTY(device, func(int) (func() error, error) {
 		return nil, errors.New("not a terminal")
 	})

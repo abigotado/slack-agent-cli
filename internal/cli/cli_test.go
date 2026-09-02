@@ -179,13 +179,13 @@ func TestAuthLoginUsesVerifiedIdentityAndNeverOutputsToken(t *testing.T) {
 func TestAuthLoginTTYUsesHiddenInputAndNeverOutputsToken(t *testing.T) {
 	t.Parallel()
 	dependencies, store, api, stdout := newTestDependencies(t)
-	dependencies.TokenTTY = func() (string, error) { return "xoxb-secret", nil }
+	dependencies.TokenTTY = func() (string, error) { return "credential-sentinel", nil }
 	api.identity = slack.Identity{WorkspaceID: "T1", WorkspaceName: "Example", WorkspaceURL: "https://example.slack.com/", UserID: "U1", BotID: "B1"}
 	status := Run(context.Background(), []string{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read", "--capability", "message-write", "--token-tty"}, dependencies)
 	if status != errx.OK {
 		t.Fatalf("status %d: %s", status, stdout.String())
 	}
-	if bytes.Contains(stdout.Bytes(), []byte("xoxb-secret")) || store.values["bangr"].Token != "xoxb-secret" {
+	if bytes.Contains(stdout.Bytes(), []byte("credential-sentinel")) || store.values["bangr"].Token != "credential-sentinel" {
 		t.Fatal("TTY credential was leaked or not stored")
 	}
 }
