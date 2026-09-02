@@ -41,6 +41,22 @@ native credential store and lock boundary.
 
 ## Install
 
+### Homebrew
+
+On macOS, install the source-building Formula from the public tap:
+
+```sh
+brew install abigotado/tap/slack-agent-cli
+slack-agent-cli version
+```
+
+The Formula pins the immutable source release by SHA-256, stages checksummed Go
+modules, and builds locally with CGO enabled so credentials remain in the
+native Security.framework Keychain backend. It does not install an unsigned
+prebuilt executable or invoke `/usr/bin/security`.
+
+### Go
+
 Go 1.25.14 or newer:
 
 ```sh
