@@ -2,6 +2,7 @@ package cli
 
 import (
 	"runtime/debug"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -45,11 +46,28 @@ func resolveBuildIdentity(info *debug.BuildInfo, ok bool, fallbackVersion, fallb
 }
 
 func validArchiveVersion(value string) bool {
-	return len(value) > 1 && value[0] == 'v' && value != archiveVersionPlaceholder
+	if len(value) < 6 || value[0] != 'v' {
+		return false
+	}
+	parts := strings.Split(value[1:], ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, character := range part {
+			if character < '0' || character > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func validArchiveCommit(value string) bool {
-	if len(value) != 40 || value == archiveCommitPlaceholder {
+	if len(value) != 40 {
 		return false
 	}
 	for _, character := range value {

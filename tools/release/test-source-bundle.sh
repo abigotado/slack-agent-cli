@@ -10,13 +10,14 @@ cleanup() {
 trap cleanup EXIT
 
 repository="$temporary_dir/repository"
-mkdir -p "$repository/assets/skills/slack" "$repository/cmd/slack-agent-cli" "$repository/docs/releases" "$repository/internal/cli"
+mkdir -p "$repository/assets/skills/slack" "$repository/cmd/slack-agent-cli" "$repository/docs/releases" "$repository/internal/cli" "$repository/tools/release/atomicrename"
+cp "$script_dir/atomicrename/"*.go "$repository/tools/release/atomicrename/"
 cd "$repository"
 git init -q -b main
 git config user.name "Release Test"
 git config user.email "release-test@example.invalid"
-printf 'module example.invalid/slack-agent-cli\n\ngo 1.25.0\n' >go.mod
-printf '' >go.sum
+printf 'module example.invalid/slack-agent-cli\n\ngo 1.25.0\n\nrequire golang.org/x/sys v0.47.0\n' >go.mod
+cp "$script_dir/../../go.sum" go.sum
 printf 'MIT\n' >LICENSE
 printf 'internal/cli/archive.go export-subst\n' >.gitattributes
 # The literal Git archive placeholders must survive fixture creation.
@@ -95,6 +96,33 @@ fi
 "$bundle_script" v0.1.0 "$commit" "$fault_output" >/dev/null
 for asset in slack-agent-cli-0.1.0.tar.gz release-manifest.json SHA256SUMS; do
   [[ -f $fault_output/$asset ]]
+done
+
+real_go=$(command -v go)
+race_bin="$temporary_dir/race-bin"
+mkdir -p "$race_bin"
+# The wrapper creates the destination after the script's final existence check
+# and immediately before the OS-level no-replace rename.
+# shellcheck disable=SC2016
+printf '#!/usr/bin/env bash\nset -euo pipefail\nif [[ $1 == run && $2 == ./tools/release/atomicrename ]]; then mkdir "$4"; fi\nexec "$REAL_GO" "$@"\n' >"$race_bin/go"
+chmod +x "$race_bin/go"
+race_output="$temporary_dir/race-output"
+if REAL_GO="$real_go" PATH="$race_bin:$PATH" "$bundle_script" v0.1.0 "$commit" "$race_output" >/dev/null 2>&1; then
+  echo "destination-appearance race unexpectedly succeeded" >&2
+  exit 1
+fi
+if find "$race_output" -mindepth 1 -print -quit | grep -q .; then
+  echo "destination-appearance race exposed final assets" >&2
+  exit 1
+fi
+if find "$temporary_dir" -maxdepth 1 -name '.race-output.staging.*' -print -quit | grep -q .; then
+  echo "destination-appearance race left staging assets" >&2
+  exit 1
+fi
+rmdir "$race_output"
+"$bundle_script" v0.1.0 "$commit" "$race_output" >/dev/null
+for asset in slack-agent-cli-0.1.0.tar.gz release-manifest.json SHA256SUMS; do
+  [[ -f $race_output/$asset ]]
 done
 
 if "$bundle_script" invalid "$commit" "$temporary_dir/invalid" >/dev/null 2>&1; then

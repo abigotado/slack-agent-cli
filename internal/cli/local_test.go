@@ -42,8 +42,8 @@ func TestResolveBuildIdentity(t *testing.T) {
 		},
 		{
 			name:        "unexpanded archive placeholders",
-			fallback:    archiveVersionPlaceholder,
-			fallbackSHA: archiveCommitPlaceholder,
+			fallback:    "$Format:%(describe:tags)$",
+			fallbackSHA: "$Format:%H$",
 			wantVersion: "dev",
 			wantCommit:  "none",
 		},

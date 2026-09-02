@@ -1,8 +1,6 @@
 package cli
 
 const (
-	archiveVersionPlaceholder = "$Format:%(describe:tags)$"
-	archiveCommitPlaceholder  = "$Format:%H$"
-	archiveVersion            = archiveVersionPlaceholder
-	archiveCommit             = archiveCommitPlaceholder
+	archiveVersion = "$Format:%(describe:tags)$"
+	archiveCommit  = "$Format:%H$"
 )

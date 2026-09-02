@@ -174,9 +174,18 @@ if [[ -e $output_dir || -L $output_dir ]]; then
   echo "output directory appeared during bundle generation" >&2
   exit 1
 fi
-mv -n "$staging_dir" "$output_dir"
+if ! go run ./tools/release/atomicrename "$staging_dir" "$output_dir"; then
+  echo "atomic no-replace release bundle publication failed" >&2
+  exit 1
+fi
 if [[ -e $staging_dir || ! -d $output_dir ]]; then
   echo "atomic release bundle publication failed" >&2
+  exit 1
+fi
+published_assets=$(find "$output_dir" -mindepth 1 -maxdepth 1 -type f -print |
+  wc -l | tr -d ' ')
+if [[ $published_assets != 3 ]]; then
+  echo "published release bundle has an unexpected asset count" >&2
   exit 1
 fi
 staging_dir=

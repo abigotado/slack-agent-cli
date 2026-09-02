@@ -44,6 +44,7 @@ jobs:
         run: |
           shellcheck tools/release/*.sh
           tools/release/test-source-bundle.sh
+          tools/release/test-production-source-bundle.sh
       - name: macOS install smoke test
         if: runner.os == 'macOS'
         shell: bash
