@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+bundle_script="$script_dir/create-source-bundle.sh"
+temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/slack-agent-cli-release-test.XXXXXX")
+cleanup() {
+  rm -rf "$temporary_dir"
+}
+trap cleanup EXIT
+
+repository="$temporary_dir/repository"
+mkdir -p "$repository/assets/skills/slack" "$repository/cmd/slack-agent-cli" "$repository/docs/releases"
+cd "$repository"
+git init -q -b main
+git config user.name "Release Test"
+git config user.email "release-test@example.invalid"
+printf 'module example.invalid/slack-agent-cli\n\ngo 1.25.0\n' >go.mod
+printf 'fixture checksums\n' >go.sum
+printf 'MIT\n' >LICENSE
+printf 'package main\n\nfunc main() {}\n' >cmd/slack-agent-cli/main.go
+printf '# fixture Skill\n' >assets/skills/slack/SKILL.md
+printf '# Changelog\n\n## [0.1.0] - 2026-09-02\n' >CHANGELOG.md
+printf '# v0.1.0\n' >docs/releases/v0.1.0.md
+git add .
+GIT_AUTHOR_DATE=2026-09-02T00:00:00Z GIT_COMMITTER_DATE=2026-09-02T00:00:00Z git commit -q -m "fixture"
+commit=$(git rev-parse HEAD)
+git update-ref refs/remotes/origin/main "$commit"
+GIT_COMMITTER_DATE=2026-09-02T00:00:01Z git tag -a v0.1.0 -m "v0.1.0" "$commit"
+
+first="$temporary_dir/first"
+second="$temporary_dir/second"
+"$bundle_script" v0.1.0 "$commit" "$first" >/dev/null
+"$bundle_script" v0.1.0 "$commit" "$second" >/dev/null
+
+for asset in slack-agent-cli-0.1.0.tar.gz release-manifest.json SHA256SUMS; do
+  cmp "$first/$asset" "$second/$asset"
+done
+
+tar -tzf "$first/slack-agent-cli-0.1.0.tar.gz" >"$temporary_dir/entries"
+grep -Fxq 'slack-agent-cli-0.1.0/go.mod' "$temporary_dir/entries"
+grep -Fxq 'slack-agent-cli-0.1.0/assets/skills/slack/SKILL.md' "$temporary_dir/entries"
+if grep -Eq '(^|/)\.git(/|$)|(^|/)outputs(/|$)|(^|/)work(/|$)' "$temporary_dir/entries"; then
+  echo "archive included forbidden local content" >&2
+  exit 1
+fi
+
+jq -e --arg commit "$commit" '
+  .schema == 1 and
+  .tag == "v0.1.0" and
+  .version == "0.1.0" and
+  .commit_sha == $commit and
+  (.tag_object_sha | test("^[0-9a-f]{40}$")) and
+  .source.name == "slack-agent-cli-0.1.0.tar.gz" and
+  (.source.sha256 | test("^[0-9a-f]{64}$")) and
+  (.source.size > 0)
+' "$first/release-manifest.json" >/dev/null
+
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$first" && sha256sum -c SHA256SUMS >/dev/null)
+else
+  (cd "$first" && shasum -a 256 -c SHA256SUMS >/dev/null)
+fi
+
+if "$bundle_script" invalid "$commit" "$temporary_dir/invalid" >/dev/null 2>&1; then
+  echo "invalid tag was accepted" >&2
+  exit 1
+fi
+git tag v0.1.1 "$commit"
+if "$bundle_script" v0.1.1 "$commit" "$temporary_dir/lightweight" >/dev/null 2>&1; then
+  echo "lightweight tag was accepted" >&2
+  exit 1
+fi
+git tag -a v0.1.2 -m v0.1.2 "$commit"
+empty_commit=$(printf '' | git commit-tree "$(git mktree </dev/null)")
+git update-ref refs/remotes/origin/main "$empty_commit"
+if "$bundle_script" v0.1.2 "$commit" "$temporary_dir/not-main" >/dev/null 2>&1; then
+  echo "commit outside origin/main was accepted" >&2
+  exit 1
+fi
+git update-ref refs/remotes/origin/main "$commit"
+printf 'dirty\n' >local-only.txt
+if "$bundle_script" v0.1.0 "$commit" "$temporary_dir/dirty" >/dev/null 2>&1; then
+  echo "dirty tree was accepted" >&2
+  exit 1
+fi
+
+echo "source release bundle tests passed"
