@@ -25,7 +25,7 @@ func TestAuthTestUsesFixedRouteAndHeader(t *testing.T) {
 			t.Fatal("missing bearer token")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true,"team":"Example","team_id":"T1","url":"https://example.slack.com/","user_id":"U1","bot_id":"B1"}`))
+		_, _ = w.Write([]byte(`{"ok":true,"team":"Example","team_id":"T1","url":"https://example.slack.com/","user":"bot","user_id":"U1","bot_id":"B1"}`))
 	}))
 	defer server.Close()
 	client := newTestClient(server.URL, &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }})
@@ -195,7 +195,7 @@ func TestConversationClassificationFailsClosed(t *testing.T) {
 
 func TestOnlyOneJSONObjectAccepted(t *testing.T) {
 	t.Parallel()
-	payload, _ := json.Marshal(apiEnvelope{OK: true, TeamID: "T1"})
+	payload, _ := json.Marshal(authTestEnvelope{OK: true, TeamID: "T1"})
 	payload = append(payload, '\n')
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(payload) }))
 	defer server.Close()

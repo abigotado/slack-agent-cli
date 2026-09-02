@@ -80,6 +80,18 @@ type apiEnvelope struct {
 	} `json:"response_metadata"`
 }
 
+type authTestEnvelope struct {
+	OK           bool   `json:"ok"`
+	Error        string `json:"error"`
+	Team         string `json:"team"`
+	TeamID       string `json:"team_id"`
+	URL          string `json:"url"`
+	User         string `json:"user"`
+	UserID       string `json:"user_id"`
+	BotID        string `json:"bot_id"`
+	EnterpriseID string `json:"enterprise_id"`
+}
+
 type apiBase struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error"`
@@ -91,7 +103,7 @@ type postEnvelope struct {
 
 // AuthTest validates a Web API token and returns exact identity.
 func (c *Client) AuthTest(ctx context.Context, token Token) (Identity, error) {
-	var response apiEnvelope
+	var response authTestEnvelope
 	if err := c.call(ctx, token, http.MethodPost, "auth.test", nil, &response, readOperation); err != nil {
 		return Identity{}, err
 	}
