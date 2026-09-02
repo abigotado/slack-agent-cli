@@ -1,9 +1,9 @@
-// Package assets embeds the canonical provider-neutral Slack Agent Skill.
+// Package assets embeds the canonical provider-neutral Slack Agent Skills.
 package assets
 
 import "embed"
 
-// Skill contains the exact same installable bytes for Codex and Claude Code.
+// Skills contains the exact same installable bytes for Codex and Claude Code.
 //
-//go:embed skills/slack
-var Skill embed.FS
+//go:embed all:skills/slack all:skills/slack-app-provisioning
+var Skills embed.FS

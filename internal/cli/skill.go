@@ -13,7 +13,7 @@ func newSkillCommand(dependencies Dependencies) *cobra.Command {
 }
 
 func newSkillLifecycleCommand(dependencies Dependencies, install bool) *cobra.Command {
-	var providerValue, scopeValue, projectDir string
+	var providerValue, scopeValue, projectDir, skillValue string
 	var dryRun, yes bool
 	name := "uninstall"
 	if install {
@@ -28,15 +28,23 @@ func newSkillLifecycleCommand(dependencies Dependencies, install bool) *cobra.Co
 		}
 		provider := skills.Provider(providerValue)
 		scope := skills.Scope(scopeValue)
-		destination, err := skills.Destination(provider, scope, projectDir)
+		skill := skills.SkillSlack
+		if skillValue != "" {
+			var err error
+			skill, err = skills.ParseSkill(skillValue)
+			if err != nil {
+				return usageError("INVALID_SKILL", "Skill selector is invalid", err)
+			}
+		}
+		destination, err := skills.Destination(skill, provider, scope, projectDir)
 		if err != nil {
 			return usageError("INVALID_SKILL_TARGET", "Skill destination is invalid", err)
 		}
 		var result skills.Result
 		if install {
-			result, err = skills.Install(command.Context(), destination, provider, scope, yes)
+			result, err = skills.Install(command.Context(), skill, destination, provider, scope, yes)
 		} else {
-			result, err = skills.Uninstall(command.Context(), destination, provider, scope, yes)
+			result, err = skills.Uninstall(command.Context(), skill, destination, provider, scope, yes)
 		}
 		if err != nil {
 			return err
@@ -45,6 +53,7 @@ func newSkillLifecycleCommand(dependencies Dependencies, install bool) *cobra.Co
 	}}
 	command.Flags().StringVar(&providerValue, "provider", "", "codex or claude")
 	command.Flags().StringVar(&scopeValue, "scope", "", "user or project")
+	command.Flags().StringVar(&skillValue, "skill", "", "explicit Skill: slack or slack-app-provisioning (default: slack)")
 	command.Flags().StringVar(&projectDir, "project-dir", "", "explicit project root for project scope")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "inspect the exact local change without writing")
 	command.Flags().BoolVar(&yes, "yes", false, "apply the exact local change")

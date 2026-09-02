@@ -87,10 +87,14 @@ workspace/team ID, workspace URL and display name, authenticated user and
 optional bot identity, enterprise identity when present, token kind, declared
 capabilities, and credential generation.
 
-The token enters through bounded stdin and is stored as a versioned Keychain
+The token enters through bounded stdin or a bounded hidden read from the
+process's controlling terminal. The interactive `--token-tty` path disables
+echo, intercepts interrupt, termination, hangup, and terminal-suspend requests,
+restores terminal state before cancelling the prompt, and never places the
+token in argv or the environment. The token is stored as a versioned Keychain
 generic-password payload bound to that full non-secret identity. The atomic
-locked registry contains no token. Re-login changes the generation, invalidating
-old policies and write receipts.
+locked registry contains no token. Re-login changes the generation,
+invalidating old policies and write receipts.
 
 ## Target and content boundary
 
@@ -116,11 +120,23 @@ Transport, timeout, server, or malformed-success conditions that might have
 applied the write become `WRITE_OUTCOME_UNKNOWN` at exit 9. One bounded read
 may prove the exact message; the CLI never sends it again automatically.
 
-## Agent Skill
+## Agent Skills
 
-`assets/skills/slack` is the single Skill source. The installer writes those
-same embedded bytes to an explicit Codex or Claude Code user/project
-destination, tracks ownership hashes, and refuses symlinked, modified, or
-unowned targets. The Skill may invoke only this fixed CLI contract and must
-never fall back to Slack MCP, `slack api`, an SDK, browser automation, or raw
-HTTP for an unsupported operation.
+The installer exposes a closed set of two embedded Skills and writes their
+same canonical bytes to an explicit Codex or Claude Code user/project
+destination. It tracks ownership hashes and refuses symlinked, modified, or
+unowned targets.
+
+`assets/skills/slack` is the runtime Skill. It may invoke only this fixed CLI
+contract and must never fall back to Slack MCP, `slack api`, an SDK, browser
+automation, or raw HTTP for an unsupported operation.
+
+`assets/skills/slack-app-provisioning` is a separate operator-setup Skill. It
+pins an official Slack CLI version, scaffold, lockfile, and three exact
+least-privilege manifests. Agents may perform bounded local inspection and
+validation in a minimal clean environment with Slack CLI telemetry explicitly
+disabled. The clean environment derives its home from the operating-system
+account record, not caller environment state, and agent invocations use direct
+argv vectors. Slack login, app installation, and runtime token entry remain
+human-only terminal handoffs. This administrative surface is not available to
+the runtime Slack Skill.

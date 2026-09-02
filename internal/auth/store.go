@@ -67,9 +67,13 @@ func ReadToken(reader io.Reader) (string, error) {
 	if len(payload) == 0 || len(payload) > contract.MaxTokenBytes {
 		return "", errors.New("token input is empty or exceeds 8 KiB")
 	}
+	return validateTokenPayload(payload)
+}
+
+func validateTokenPayload(payload []byte) (string, error) {
 	payload = bytes.TrimSuffix(payload, []byte{'\n'})
 	payload = bytes.TrimSuffix(payload, []byte{'\r'})
-	if len(payload) == 0 || bytes.ContainsAny(payload, "\r\n\x00") {
+	if len(payload) == 0 || len(payload) > contract.MaxTokenBytes || bytes.ContainsAny(payload, "\r\n\x00") {
 		return "", errors.New("token input must be exactly one non-empty line")
 	}
 	if !utf8.Valid(payload) {
@@ -82,6 +86,9 @@ func ReadToken(reader io.Reader) (string, error) {
 		if unicode.IsSpace(r) || unicode.IsControl(r) {
 			return "", errors.New("token input contains whitespace or control characters")
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("scan token input: %w", err)
 	}
 	return string(payload), nil
 }

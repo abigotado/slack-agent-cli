@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.2.0] - 2026-09-02
+
+- Add bounded hidden controlling-terminal token input with `auth login
+  --token-tty`.
+- Add a separately installable Slack app-provisioning Skill for Codex and
+  Claude Code with pinned official Slack CLI scaffolding and exact public plus
+  private channel manifests.
+
 ## [0.1.0] - 2026-09-02
 
 - Add explicit multi-profile Slack authentication backed by macOS Keychain.
@@ -13,3 +21,4 @@ All notable changes to this project are documented in this file.
   Claude Code.
 
 [0.1.0]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.1.0
+[0.2.0]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.0

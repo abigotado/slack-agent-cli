@@ -1,0 +1,4 @@
+interface:
+  display_name: "Slack App Provisioning"
+  short_description: "Prepare least-privilege Slack app installs"
+  default_prompt: "Use $slack-app-provisioning to prepare and validate a least-privilege Slack app for my exact workspace."

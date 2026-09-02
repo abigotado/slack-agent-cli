@@ -59,6 +59,7 @@ type Dependencies struct {
 	Writes        WriteAPI
 	WriteState    *writestate.Tracker
 	Input         io.Reader
+	TokenTTY      func() (string, error)
 	Output        *output.Writer
 }
 
@@ -76,7 +77,7 @@ func DefaultDependencies() (Dependencies, error) {
 	return Dependencies{
 		Profiles: profiles, Policies: policies, Credentials: auth.KeychainStore{},
 		Auth: client, Conversations: client, Messages: client, Users: client, Writes: client,
-		WriteState: &writestate.Tracker{}, Input: os.Stdin, Output: output.New(),
+		WriteState: &writestate.Tracker{}, Input: os.Stdin, TokenTTY: auth.ReadTokenTTY, Output: output.New(),
 	}, nil
 }
 
