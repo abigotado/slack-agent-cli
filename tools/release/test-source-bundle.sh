@@ -16,7 +16,7 @@ cd "$repository"
 git init -q -b main
 git config user.name "Release Test"
 git config user.email "release-test@example.invalid"
-printf 'module example.invalid/slack-agent-cli\n\ngo 1.25.0\n\nrequire golang.org/x/sys v0.47.0\n' >go.mod
+printf 'module example.invalid/slack-agent-cli\n\ngo 1.25.14\n\nrequire golang.org/x/sys v0.47.0\n' >go.mod
 cp "$script_dir/../../go.sum" go.sum
 printf 'MIT\n' >LICENSE
 printf 'internal/cli/archive.go export-subst\n' >.gitattributes

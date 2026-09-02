@@ -41,7 +41,7 @@ native credential store and lock boundary.
 
 ## Install
 
-Go 1.25 or newer:
+Go 1.25.14 or newer:
 
 ```sh
 go install github.com/abigotado/slack-agent-cli/cmd/slack-agent-cli@v0.1.0

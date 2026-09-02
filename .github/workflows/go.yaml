@@ -42,9 +42,11 @@ jobs:
       - name: Release tooling tests
         shell: bash
         run: |
-          shellcheck tools/release/*.sh
           tools/release/test-source-bundle.sh
           tools/release/test-production-source-bundle.sh
+      - name: Shell lint
+        if: runner.os == 'Linux'
+        run: shellcheck tools/release/*.sh
       - name: macOS install smoke test
         if: runner.os == 'macOS'
         shell: bash
@@ -65,7 +67,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+          go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
           go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
       - name: Workflow lint
         if: runner.os == 'Linux'
