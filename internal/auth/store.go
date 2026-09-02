@@ -56,12 +56,12 @@ func (c Credential) ValidateBinding(p profile.Profile) error {
 
 // ReadToken reads exactly one bounded non-empty token line.
 func ReadToken(reader io.Reader) (string, error) {
-	limited := io.LimitReader(reader, contract.MaxTokenBytes+1)
+	limited := io.LimitReader(reader, contract.MaxTokenBytes+3)
 	payload, err := io.ReadAll(limited)
 	if err != nil {
 		return "", fmt.Errorf("read token: %w", err)
 	}
-	if len(payload) == 0 || len(payload) > contract.MaxTokenBytes {
+	if len(payload) == 0 {
 		return "", errors.New("token input is empty or exceeds 8 KiB")
 	}
 	return validateTokenPayload(payload)

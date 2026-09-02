@@ -27,6 +27,17 @@ const (
 	Conflict
 )
 
+// Valid reports whether the stage is part of the fixed diagnostic contract.
+func (stage Stage) Valid() bool {
+	switch stage {
+	case StagePreDispatch, StageTransport, StageHTTPResponse, StageHTTPServer,
+		StageRateLimitResponse, StageResponseBody, StageResponseJSON, StageAPIError:
+		return true
+	default:
+		return false
+	}
+}
+
 const (
 	// StagePreDispatch means cancellation was observed before an HTTP dispatch.
 	StagePreDispatch Stage = "pre_dispatch"

@@ -30,7 +30,12 @@ func TestReadToken(t *testing.T) {
 		{"space", "xoxb bad\n", false},
 		{"DEL", "xoxb-\x7f\n", false},
 		{"non-ASCII", "xoxb-é\n", false},
-		{"oversized", strings.Repeat("a", 8193), false},
+		{"maximum without terminator", strings.Repeat("a", 8192), true},
+		{"maximum with LF", strings.Repeat("a", 8192) + "\n", true},
+		{"maximum with CRLF", strings.Repeat("a", 8192) + "\r\n", true},
+		{"oversized without terminator", strings.Repeat("a", 8193), false},
+		{"oversized with LF", strings.Repeat("a", 8193) + "\n", false},
+		{"oversized with CRLF", strings.Repeat("a", 8193) + "\r\n", false},
 	}
 	for _, test := range tests {
 		test := test
