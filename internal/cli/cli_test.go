@@ -192,17 +192,55 @@ func TestAuthLoginTTYUsesHiddenInputAndNeverOutputsToken(t *testing.T) {
 
 func TestAuthLoginRejectsAmbiguousOrUnavailableTokenInputBeforeNetwork(t *testing.T) {
 	t.Parallel()
-	for _, args := range [][]string{
-		{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read"},
-		{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read", "--token-stdin", "--token-tty"},
-		{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read", "--token-tty"},
+	for _, test := range []struct {
+		args []string
+		code string
+	}{
+		{[]string{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read"}, "TOKEN_STDIN_REQUIRED"},
+		{[]string{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read", "--token-stdin", "--token-tty"}, "TOKEN_INPUT_CONFLICT"},
+		{[]string{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read", "--token-tty"}, "TOKEN_TTY_UNAVAILABLE"},
 	} {
 		dependencies, _, api, stdout := newTestDependencies(t)
-		if exit := Run(context.Background(), args, dependencies); exit != errx.Usage {
-			t.Fatalf("args=%v exit=%d output=%q", args, exit, stdout.String())
+		if exit := Run(context.Background(), test.args, dependencies); exit != errx.Usage {
+			t.Fatalf("args=%v exit=%d output=%q", test.args, exit, stdout.String())
 		}
 		if len(api.calls) != 0 {
-			t.Fatalf("args=%v calls=%v", args, api.calls)
+			t.Fatalf("args=%v calls=%v", test.args, api.calls)
+		}
+		if code := decodeEnvelope(t, stdout)["error"].(map[string]any)["code"]; code != test.code {
+			t.Fatalf("args=%v code=%v want=%s", test.args, code, test.code)
+		}
+		if test.code == "TOKEN_STDIN_REQUIRED" {
+			errorBody := decodeEnvelope(t, stdout)["error"].(map[string]any)
+			if errorBody["message"] != "--token-stdin is required" {
+				t.Fatalf("legacy error body=%v", errorBody)
+			}
+		}
+	}
+}
+
+func TestAuthLoginClassifiesTTYRecoveryFailuresBeforeNetwork(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		err  error
+		exit errx.Exit
+		code string
+	}{
+		{auth.ErrTTYInterrupted, errx.Usage, "TOKEN_TTY_INTERRUPTED"},
+		{auth.ErrTTYRestore, errx.Internal, "TOKEN_TTY_RECOVERY_REQUIRED"},
+		{auth.ErrTTYIO, errx.Internal, "TOKEN_TTY_IO_FAILED"},
+	} {
+		dependencies, _, api, stdout := newTestDependencies(t)
+		dependencies.TokenTTY = func() (string, error) { return "", test.err }
+		args := []string{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read", "--token-tty"}
+		if exit := Run(context.Background(), args, dependencies); exit != test.exit {
+			t.Fatalf("err=%v exit=%d output=%q", test.err, exit, stdout.String())
+		}
+		if len(api.calls) != 0 {
+			t.Fatalf("err=%v calls=%v", test.err, api.calls)
+		}
+		if code := decodeEnvelope(t, stdout)["error"].(map[string]any)["code"]; code != test.code {
+			t.Fatalf("err=%v code=%v want=%s", test.err, code, test.code)
 		}
 	}
 }

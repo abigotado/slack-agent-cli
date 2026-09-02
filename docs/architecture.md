@@ -89,8 +89,9 @@ capabilities, and credential generation.
 
 The token enters through bounded stdin or a bounded hidden read from the
 process's controlling terminal. The interactive `--token-tty` path disables
-echo, restores terminal state on every return, and never places the token in
-argv or the environment. The token is stored as a versioned Keychain
+echo, intercepts interrupt, termination, hangup, and terminal-suspend requests,
+restores terminal state before cancelling the prompt, and never places the
+token in argv or the environment. The token is stored as a versioned Keychain
 generic-password payload bound to that full non-secret identity. The atomic
 locked registry contains no token. Re-login changes the generation,
 invalidating old policies and write receipts.
@@ -133,6 +134,7 @@ automation, or raw HTTP for an unsupported operation.
 `assets/skills/slack-app-provisioning` is a separate operator-setup Skill. It
 pins an official Slack CLI version, scaffold, lockfile, and three exact
 least-privilege manifests. Agents may perform bounded local inspection and
-validation, but Slack login, app installation, and runtime token entry remain
+validation in a minimal clean environment with Slack CLI telemetry explicitly
+disabled. Slack login, app installation, and runtime token entry remain
 human-only terminal handoffs. This administrative surface is not available to
 the runtime Slack Skill.

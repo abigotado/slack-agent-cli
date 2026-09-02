@@ -8,6 +8,10 @@ approved locked `npm ci --ignore-scripts --no-audit --no-fund` completed.
 `validated` means the environment/version gates, manifest inspection, and
 manifest validation all completed within their output bounds.
 
+Every transition that invokes Slack CLI uses the sanitized environment with
+telemetry disabled. A caller-provided Slack environment variable or a command
+without that prefix leaves the state unchanged.
+
 Only `validated` may advance to a human install handoff.
 
 ## Remote handoff states

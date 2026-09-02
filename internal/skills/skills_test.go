@@ -75,6 +75,31 @@ func TestProvisioningSkillPinsCanonicalAllChannelsManifestAndHooks(t *testing.T)
 	if !strings.Contains(lockfile, `"version": "2.0.0"`) || !strings.Contains(lockfile, "sha512-VLxGqJZwbrH3S+ovRhqlrcrKWHRDJtn3toraZKAcLaPqca5CgqTa/PmiCvCq3uUowiFw9B7FOB0y3ikQoDppTw==") {
 		t.Fatal("canonical Slack CLI hooks lock is missing")
 	}
+	commands := string(files["references/commands.md"])
+	for _, name := range []string{
+		"ACCESSIBLE",
+		"SLACK_API_URL",
+		"SLACK_AUTO_REQUEST_AAA",
+		"SLACK_CLI_APP_ICON_PATH",
+		"SLACK_CLI_XAPP",
+		"SLACK_CLI_XOXB",
+		"SLACK_CONFIG_DIR",
+		"SLACK_DISABLE_TELEMETRY",
+		"SLACK_TEST_TRACE",
+		"SLACK_TEST_VERSION",
+	} {
+		if !strings.Contains(commands, name) {
+			t.Fatalf("official Slack CLI environment gate is missing %s", name)
+		}
+	}
+	if !strings.Contains(commands, "/usr/bin/env -i HOME=ABSOLUTE_HOME") || !strings.Contains(commands, "SLACK_DISABLE_TELEMETRY=1 ABSOLUTE_SLACK_BIN") {
+		t.Fatal("sanitized Slack CLI environment is missing")
+	}
+	for _, line := range strings.Split(commands, "\n") {
+		if strings.Contains(line, "--skip-update --no-color") && !strings.HasPrefix(line, "SANITIZED_PREFIX ") {
+			t.Fatalf("Slack CLI command lacks sanitized prefix: %q", line)
+		}
+	}
 }
 
 func scratchDir(t *testing.T) string {

@@ -2,7 +2,16 @@
 
 package auth
 
-import "golang.org/x/sys/unix"
+import (
+	"os"
+	"syscall"
+
+	"golang.org/x/sys/unix"
+)
+
+func ttyInterruptSignals() []os.Signal {
+	return []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGTSTP}
+}
 
 func disableTTYEcho(fd int) (func() error, error) {
 	original, err := unix.IoctlGetTermios(fd, unix.TCGETS)

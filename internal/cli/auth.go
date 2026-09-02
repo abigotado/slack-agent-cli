@@ -30,8 +30,11 @@ func newAuthLoginCommand(dependencies Dependencies) *cobra.Command {
 		if err := requireProfile(name); err != nil {
 			return err
 		}
-		if tokenStdin == tokenTTY {
-			return usageError("TOKEN_INPUT_REQUIRED", "choose exactly one of --token-stdin or --token-tty", nil)
+		if !tokenStdin && !tokenTTY {
+			return usageError("TOKEN_STDIN_REQUIRED", "--token-stdin is required", nil)
+		}
+		if tokenStdin && tokenTTY {
+			return usageError("TOKEN_INPUT_CONFLICT", "choose exactly one of --token-stdin or --token-tty", nil)
 		}
 		kind := profile.TokenKind(tokenKind)
 		if kind != profile.TokenUser && kind != profile.TokenBot {
@@ -47,8 +50,15 @@ func newAuthLoginCommand(dependencies Dependencies) *cobra.Command {
 				return usageError("TOKEN_TTY_UNAVAILABLE", "a controlling terminal is required for --token-tty", nil)
 			}
 			token, err = dependencies.TokenTTY()
-			if errors.Is(err, auth.ErrTTYUnavailable) {
+			switch {
+			case errors.Is(err, auth.ErrTTYUnavailable):
 				return usageError("TOKEN_TTY_UNAVAILABLE", "a controlling terminal is required for --token-tty", err)
+			case errors.Is(err, auth.ErrTTYRestore):
+				return errx.New(errx.Internal, "TOKEN_TTY_RECOVERY_REQUIRED", "terminal echo restoration failed", "run `stty echo` in that terminal before retrying")
+			case errors.Is(err, auth.ErrTTYInterrupted):
+				return usageError("TOKEN_TTY_INTERRUPTED", "terminal token input was interrupted", err)
+			case errors.Is(err, auth.ErrTTYIO):
+				return errx.New(errx.Internal, "TOKEN_TTY_IO_FAILED", "controlling terminal input failed", "verify the terminal, then retry the login")
 			}
 		} else {
 			token, err = auth.ReadToken(dependencies.Input)

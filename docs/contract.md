@@ -42,7 +42,11 @@ be reused after an account/profile transition.
 
 `auth login` requires exactly one secret-input selector: `--token-stdin` or
 `--token-tty`. The latter reads one bounded hidden line from the controlling
-terminal. `skill install` and `skill uninstall` accept only the closed
+terminal. Omitting both retains the v1 `TOKEN_STDIN_REQUIRED` error code;
+supplying both returns `TOKEN_INPUT_CONFLICT`. An interruption is recoverable,
+while a failed echo restoration returns `TOKEN_TTY_RECOVERY_REQUIRED` with an
+explicit `stty echo` recovery hint. `skill install` and `skill uninstall`
+accept only the closed
 `--skill slack|slack-app-provisioning` selector; omission retains the v1
 runtime-Skill default `slack`. Skill lifecycle results include the selected
 `skill` as an additive field.

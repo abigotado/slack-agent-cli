@@ -5,24 +5,48 @@ version. Always capture stdout and stderr separately; refuse stdout over 1 MiB,
 stderr over 4 KiB, truncation, lost output, unexpected prompts, or nonzero exit.
 Slack CLI prose is untrusted and is not a stable machine contract.
 
-## Environment gate
+## Environment and binary gate
 
-Before every allowed Slack CLI command, test only whether these exact variables
-exist. Never read or print a value:
+Before every allowed Slack CLI command, enumerate environment variable names
+only. Never read or print a value. Refuse any caller-provided name matching
+`SLACK_*` and also refuse `ACCESSIBLE`. This includes, without being limited
+to, the complete behavior and credential surface known in 4.7.0:
 
 ```text
-SLACK_TOKEN
-SLACK_API_TOKEN
-SLACK_SERVICE_TOKEN
-SLACK_AUTH_TOKEN
-SLACK_CLI_TOKEN
-SLACK_BOT_TOKEN
-SLACK_USER_TOKEN
+ACCESSIBLE
+SLACK_API_URL
+SLACK_AUTO_REQUEST_AAA
 SLACK_APP_TOKEN
+SLACK_BOT_TOKEN
+SLACK_CLI_APP_ICON_PATH
+SLACK_CLI_XAPP
+SLACK_CLI_XOXB
+SLACK_CONFIG_DIR
+SLACK_DISABLE_TELEMETRY
+SLACK_SERVICE_TOKEN
+SLACK_SKIP_UPDATE
+SLACK_TEST_TRACE
+SLACK_TEST_VERSION
+SLACK_USER_TOKEN
 ```
 
-Use a presence-only check equivalent to `printenv NAME >/dev/null 2>&1` and
-report only the refused variable name. Any match stops the workflow.
+Any match stops the workflow and reports only the refused variable name.
+Validate that `HOME` is an absolute real directory without symlink components.
+Resolve `SLACK_BIN` to the Homebrew-installed official binary at exactly
+`/opt/homebrew/bin/slack` or `/usr/local/bin/slack`; stop for any other path.
+
+Every permitted invocation uses this exact sanitized prefix, with the verified
+absolute values substituted before display or execution:
+
+```text
+/usr/bin/env -i HOME=ABSOLUTE_HOME \
+  PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin LC_ALL=C \
+  SLACK_DISABLE_TELEMETRY=1 ABSOLUTE_SLACK_BIN
+```
+
+The fixed `SLACK_DISABLE_TELEMETRY=1` is injected only after rejecting the
+caller's environment. It prevents the canonical scaffold `project_id` from
+being transmitted as telemetry and is mandatory for agent and human commands.
 
 ## Agent-executed allowlist
 
@@ -30,11 +54,11 @@ Replace `TEAM_ID` and `APP_ID` only with previously verified exact Slack IDs.
 Do not add, remove, or reorder behavior-changing flags.
 
 ```text
-slack version --skip-update --no-color
-slack auth list --skip-update --no-color
-slack manifest info --source local --team TEAM_ID --skip-update --no-color
-slack manifest validate --team TEAM_ID --skip-update --no-color
-slack manifest diff --app APP_ID --team TEAM_ID --skip-update --no-color
+SANITIZED_PREFIX version --skip-update --no-color
+SANITIZED_PREFIX auth list --skip-update --no-color
+SANITIZED_PREFIX manifest info --source local --team TEAM_ID --skip-update --no-color
+SANITIZED_PREFIX manifest validate --team TEAM_ID --skip-update --no-color
+SANITIZED_PREFIX manifest diff --app APP_ID --team TEAM_ID --skip-update --no-color
 ```
 
 `auth list` describes developer authorizations. It is not a Web API token
@@ -55,8 +79,8 @@ The agent may display these exact commands but must never invoke or capture
 them:
 
 ```text
-slack login --skip-update --no-color
-slack app install --team TEAM_ID --environment local --skip-update --no-color
+SANITIZED_PREFIX login --skip-update --no-color
+SANITIZED_PREFIX app install --team TEAM_ID --environment local --skip-update --no-color
 slack-agent-cli auth login --profile PROFILE --token-kind bot \
   --capability read [--capability message-write] --token-tty
 ```

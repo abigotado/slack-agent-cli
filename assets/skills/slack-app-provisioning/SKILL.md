@@ -13,8 +13,9 @@ interactive lifecycle mutation from an agent-captured session.
 
 1. Require an exact workspace Team ID. Names and a sole authorization are not
    selectors.
-2. Support only official Slack CLI `4.7.0`. Use only the exact commands and
-   flags in [references/commands.md](references/commands.md).
+2. Support only official Slack CLI `4.7.0`. Reject caller Slack environment
+   variables and use the exact sanitized environment, commands, and flags in
+   [references/commands.md](references/commands.md).
 3. Never receive, capture, display, paste, or request an auth ticket, challenge
    code, bot token, user token, client secret, or signing secret. Never read a
    Slack CLI credential file or token-bearing environment value.
