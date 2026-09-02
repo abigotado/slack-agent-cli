@@ -47,6 +47,58 @@ func TestCredentialBinding(t *testing.T) {
 	}
 }
 
+func TestCredentialCodec(t *testing.T) {
+	t.Parallel()
+	credential := Credential{
+		Version:         1,
+		Token:           "sentinel",
+		ProfileIdentity: "identity",
+		Generation:      "generation",
+		Capabilities:    []profile.Capability{profile.CapabilityRead},
+	}
+	payload, err := encodeCredential(credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeCredential(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Version != credential.Version || decoded.Token != credential.Token || decoded.ProfileIdentity != credential.ProfileIdentity || decoded.Generation != credential.Generation || len(decoded.Capabilities) != 1 || decoded.Capabilities[0] != profile.CapabilityRead {
+		t.Fatalf("decoded credential does not match input: %#v", decoded)
+	}
+}
+
+func TestCredentialCodecRejectsInvalidPayloads(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		payload []byte
+	}{
+		{name: "empty"},
+		{name: "malformed JSON", payload: []byte("{")},
+		{name: "missing token", payload: []byte(`{"version":1}`)},
+		{name: "unsupported version", payload: []byte(`{"version":2,"token":"sentinel"}`)},
+		{name: "oversized", payload: []byte(strings.Repeat("x", 16385))},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := decodeCredential(test.payload); err == nil {
+				t.Fatal("invalid credential payload was accepted")
+			}
+		})
+	}
+}
+
+func TestEncodeCredentialRejectsInvalidValue(t *testing.T) {
+	t.Parallel()
+	if _, err := encodeCredential(Credential{Version: 1, ProfileIdentity: "identity", Generation: "generation"}); err == nil {
+		t.Fatal("credential without a token was accepted")
+	}
+}
+
 type memoryStore struct {
 	mu            sync.Mutex
 	values        map[string]Credential

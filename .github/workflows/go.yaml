@@ -55,7 +55,8 @@ jobs:
           export GOBIN="$RUNNER_TEMP/bin"
           go install ./cmd/slack-agent-cli
           "$GOBIN/slack-agent-cli" version |
-            jq -e '.ok == true and .v == 1 and .data.version == "dev"' >/dev/null
+            jq -e --arg commit "$GITHUB_SHA" \
+              '.ok == true and .v == 1 and .data.commit == $commit and (.data.version | strings | length > 0)' >/dev/null
       - name: Linux build smoke test
         if: runner.os == 'Linux'
         shell: bash
