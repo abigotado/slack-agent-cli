@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.2.1] - 2026-09-02
+
+- Republish the v0.2 feature set with the complete immutable source release
+  bundle after the initial v0.2.0 GitHub release was removed before assets were
+  attached. Runtime behavior is unchanged from v0.2.0.
+
 ## [0.2.0] - 2026-09-02
 
 - Add bounded hidden controlling-terminal token input with `auth login
@@ -22,3 +28,4 @@ All notable changes to this project are documented in this file.
 
 [0.1.0]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.1.0
 [0.2.0]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.0
+[0.2.1]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.1
