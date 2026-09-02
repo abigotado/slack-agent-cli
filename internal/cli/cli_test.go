@@ -89,7 +89,7 @@ func newTestDependencies(t *testing.T) (Dependencies, *fakeStore, *fakeSlack, *b
 	store := &fakeStore{values: map[string]auth.Credential{}}
 	api := &fakeSlack{identity: slack.Identity{WorkspaceID: "T1", WorkspaceName: "Example", WorkspaceURL: "https://example.slack.com/", UserID: "U1"}}
 	stdout := &bytes.Buffer{}
-	return Dependencies{Profiles: profiles, Policies: policies, Credentials: store, Auth: api, Conversations: api, Messages: api, Users: api, Writes: api, WriteState: &writestate.Tracker{}, Input: bytes.NewBuffer(nil), Output: &output.Writer{Out: stdout, Err: &bytes.Buffer{}}}, store, api, stdout
+	return Dependencies{Profiles: profiles, Policies: policies, Credentials: store, Auth: api, Conversations: api, Messages: api, Users: api, Writes: api, WriteState: &writestate.Tracker{}, Input: bytes.NewBuffer(nil), TokenTTY: func() (string, error) { return "", auth.ErrTTYUnavailable }, Output: &output.Writer{Out: stdout, Err: &bytes.Buffer{}}}, store, api, stdout
 }
 
 func decodeEnvelope(t *testing.T, buffer *bytes.Buffer) map[string]any {
@@ -173,6 +173,77 @@ func TestAuthLoginUsesVerifiedIdentityAndNeverOutputsToken(t *testing.T) {
 	credential := store.values["work"]
 	if credential.Token != "xoxp-secret" || credential.ProfileIdentity != profile.Identity(p) {
 		t.Fatal("credential binding mismatch")
+	}
+}
+
+func TestAuthLoginTTYUsesHiddenInputAndNeverOutputsToken(t *testing.T) {
+	t.Parallel()
+	dependencies, store, api, stdout := newTestDependencies(t)
+	dependencies.TokenTTY = func() (string, error) { return "xoxb-secret", nil }
+	api.identity = slack.Identity{WorkspaceID: "T1", WorkspaceName: "Example", WorkspaceURL: "https://example.slack.com/", UserID: "U1", BotID: "B1"}
+	status := Run(context.Background(), []string{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read", "--capability", "message-write", "--token-tty"}, dependencies)
+	if status != errx.OK {
+		t.Fatalf("status %d: %s", status, stdout.String())
+	}
+	if bytes.Contains(stdout.Bytes(), []byte("xoxb-secret")) || store.values["bangr"].Token != "xoxb-secret" {
+		t.Fatal("TTY credential was leaked or not stored")
+	}
+}
+
+func TestAuthLoginRejectsAmbiguousOrUnavailableTokenInputBeforeNetwork(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read"},
+		{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read", "--token-stdin", "--token-tty"},
+		{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read", "--token-tty"},
+	} {
+		dependencies, _, api, stdout := newTestDependencies(t)
+		if exit := Run(context.Background(), args, dependencies); exit != errx.Usage {
+			t.Fatalf("args=%v exit=%d output=%q", args, exit, stdout.String())
+		}
+		if len(api.calls) != 0 {
+			t.Fatalf("args=%v calls=%v", args, api.calls)
+		}
+	}
+}
+
+func TestSkillLifecycleSelectsProvisioningSkillExplicitly(t *testing.T) {
+	t.Parallel()
+	dependencies, _, _, stdout := newTestDependencies(t)
+	root := t.TempDir()
+	status := Run(context.Background(), []string{
+		"skill", "install",
+		"--skill", "slack-app-provisioning",
+		"--provider", "codex",
+		"--scope", "project",
+		"--project-dir", root,
+		"--dry-run",
+	}, dependencies)
+	if status != errx.OK {
+		t.Fatalf("status %d: %s", status, stdout.String())
+	}
+	data := decodeEnvelope(t, stdout)["data"].(map[string]any)
+	if data["skill"] != "slack-app-provisioning" || data["destination"] != filepath.Join(root, ".agents", "skills", "slack-app-provisioning") {
+		t.Fatalf("data=%v", data)
+	}
+}
+
+func TestSkillLifecycleRejectsUnknownSkill(t *testing.T) {
+	t.Parallel()
+	dependencies, _, _, stdout := newTestDependencies(t)
+	status := Run(context.Background(), []string{
+		"skill", "install",
+		"--skill", "../../../escape",
+		"--provider", "codex",
+		"--scope", "project",
+		"--project-dir", t.TempDir(),
+		"--dry-run",
+	}, dependencies)
+	if status != errx.Usage {
+		t.Fatalf("status %d: %s", status, stdout.String())
+	}
+	if decodeEnvelope(t, stdout)["error"].(map[string]any)["code"] != "INVALID_SKILL" {
+		t.Fatalf("output=%s", stdout.String())
 	}
 }
 

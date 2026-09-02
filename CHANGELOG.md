@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+- Add bounded hidden controlling-terminal token input with `auth login
+  --token-tty`.
+- Add a separately installable Slack app-provisioning Skill for Codex and
+  Claude Code with pinned official Slack CLI scaffolding and exact public plus
+  private channel manifests.
+
 ## [0.1.0] - 2026-09-02
 
 - Add explicit multi-profile Slack authentication backed by macOS Keychain.

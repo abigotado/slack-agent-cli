@@ -25,13 +25,13 @@ func newAuthCommand(dependencies Dependencies) *cobra.Command {
 func newAuthLoginCommand(dependencies Dependencies) *cobra.Command {
 	var name, tokenKind string
 	var capabilities []string
-	var tokenStdin, yes bool
+	var tokenStdin, tokenTTY, yes bool
 	command := &cobra.Command{Use: "login", Args: exactArgs(0), RunE: func(command *cobra.Command, _ []string) error {
 		if err := requireProfile(name); err != nil {
 			return err
 		}
-		if !tokenStdin {
-			return usageError("TOKEN_STDIN_REQUIRED", "--token-stdin is required", nil)
+		if tokenStdin == tokenTTY {
+			return usageError("TOKEN_INPUT_REQUIRED", "choose exactly one of --token-stdin or --token-tty", nil)
 		}
 		kind := profile.TokenKind(tokenKind)
 		if kind != profile.TokenUser && kind != profile.TokenBot {
@@ -41,7 +41,18 @@ func newAuthLoginCommand(dependencies Dependencies) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		token, err := auth.ReadToken(dependencies.Input)
+		var token string
+		if tokenTTY {
+			if dependencies.TokenTTY == nil {
+				return usageError("TOKEN_TTY_UNAVAILABLE", "a controlling terminal is required for --token-tty", nil)
+			}
+			token, err = dependencies.TokenTTY()
+			if errors.Is(err, auth.ErrTTYUnavailable) {
+				return usageError("TOKEN_TTY_UNAVAILABLE", "a controlling terminal is required for --token-tty", err)
+			}
+		} else {
+			token, err = auth.ReadToken(dependencies.Input)
+		}
 		if err != nil {
 			return usageError("INVALID_TOKEN_INPUT", "token input is invalid", err)
 		}
@@ -67,6 +78,7 @@ func newAuthLoginCommand(dependencies Dependencies) *cobra.Command {
 	command.Flags().StringVar(&tokenKind, "token-kind", "", "user or bot")
 	command.Flags().StringSliceVar(&capabilities, "capability", nil, "declared capability: read or message-write")
 	command.Flags().BoolVar(&tokenStdin, "token-stdin", false, "read one bounded token line from stdin")
+	command.Flags().BoolVar(&tokenTTY, "token-tty", false, "read one bounded hidden token line from the controlling terminal")
 	command.Flags().BoolVar(&yes, "yes", false, "confirm exact profile overwrite")
 	return command
 }

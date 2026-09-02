@@ -1,4 +1,4 @@
-// Package skills installs one canonical Skill for Codex or Claude Code.
+// Package skills installs a closed set of canonical Skills for Codex or Claude Code.
 package skills
 
 import (
@@ -52,11 +52,32 @@ const (
 	ScopeProject Scope = "project"
 )
 
+// Skill identifies an embedded installable Skill. It is a closed allowlist,
+// never a caller-provided path.
+type Skill string
+
+const (
+	SkillSlack           Skill = "slack"
+	SkillAppProvisioning Skill = "slack-app-provisioning"
+)
+
+// ParseSkill validates an external Skill selector.
+func ParseSkill(value string) (Skill, error) {
+	skill := Skill(value)
+	switch skill {
+	case SkillSlack, SkillAppProvisioning:
+		return skill, nil
+	default:
+		return "", errors.New("skill must be slack or slack-app-provisioning")
+	}
+}
+
 // Result describes a local Skill lifecycle operation.
 type Result struct {
 	Destination string   `json:"destination"`
 	Provider    Provider `json:"provider"`
 	Scope       Scope    `json:"scope"`
+	Skill       Skill    `json:"skill"`
 	Changed     bool     `json:"changed"`
 	Applied     bool     `json:"applied"`
 	Files       int      `json:"files"`
@@ -68,7 +89,10 @@ type manifest struct {
 }
 
 // Destination resolves an allowlisted provider/scope location.
-func Destination(provider Provider, scope Scope, projectDir string) (string, error) {
+func Destination(skill Skill, provider Provider, scope Scope, projectDir string) (string, error) {
+	if _, err := ParseSkill(string(skill)); err != nil {
+		return "", err
+	}
 	var root, relative string
 	switch scope {
 	case ScopeUser:
@@ -79,9 +103,9 @@ func Destination(provider Provider, scope Scope, projectDir string) (string, err
 		root = home
 		switch provider {
 		case ProviderCodex:
-			relative = filepath.Join(".agents", "skills", "slack")
+			relative = filepath.Join(".agents", "skills", string(skill))
 		case ProviderClaude:
-			relative = filepath.Join(".claude", "skills", "slack")
+			relative = filepath.Join(".claude", "skills", string(skill))
 		default:
 			return "", errors.New("provider must be codex or claude")
 		}
@@ -96,9 +120,9 @@ func Destination(provider Provider, scope Scope, projectDir string) (string, err
 		root = absolute
 		switch provider {
 		case ProviderCodex:
-			relative = filepath.Join(".agents", "skills", "slack")
+			relative = filepath.Join(".agents", "skills", string(skill))
 		case ProviderClaude:
-			relative = filepath.Join(".claude", "skills", "slack")
+			relative = filepath.Join(".claude", "skills", string(skill))
 		default:
 			return "", errors.New("provider must be codex or claude")
 		}
@@ -116,12 +140,12 @@ func Destination(provider Provider, scope Scope, projectDir string) (string, err
 }
 
 // Install validates ownership and installs the canonical bytes when apply is true.
-func Install(ctx context.Context, destination string, provider Provider, scope Scope, apply bool) (Result, error) {
-	files, err := canonicalFiles()
+func Install(ctx context.Context, skill Skill, destination string, provider Provider, scope Scope, apply bool) (Result, error) {
+	files, err := canonicalFiles(skill)
 	if err != nil {
 		return Result{}, err
 	}
-	result := Result{Destination: destination, Provider: provider, Scope: scope, Files: len(files)}
+	result := Result{Destination: destination, Provider: provider, Scope: scope, Skill: skill, Files: len(files)}
 	desired := buildManifest(files)
 	if !apply {
 		if _, err := os.Lstat(destination + ".previous"); err == nil {
@@ -179,8 +203,11 @@ func Install(ctx context.Context, destination string, provider Provider, scope S
 }
 
 // Uninstall removes only an intact owned installation.
-func Uninstall(ctx context.Context, destination string, provider Provider, scope Scope, apply bool) (Result, error) {
-	result := Result{Destination: destination, Provider: provider, Scope: scope}
+func Uninstall(ctx context.Context, skill Skill, destination string, provider Provider, scope Scope, apply bool) (Result, error) {
+	if _, err := ParseSkill(string(skill)); err != nil {
+		return Result{}, err
+	}
+	result := Result{Destination: destination, Provider: provider, Scope: scope, Skill: skill}
 	if !apply {
 		if _, err := os.Lstat(destination + ".removing"); err == nil {
 			return Result{}, fmt.Errorf("%w: interrupted uninstall requires an applied recovery", ErrConflict)
@@ -259,8 +286,11 @@ func Uninstall(ctx context.Context, destination string, provider Provider, scope
 	return result, err
 }
 
-func canonicalFiles() (map[string][]byte, error) {
-	root, err := fs.Sub(assets.Skill, "skills/slack")
+func canonicalFiles(skill Skill) (map[string][]byte, error) {
+	if _, err := ParseSkill(string(skill)); err != nil {
+		return nil, err
+	}
+	root, err := fs.Sub(assets.Skills, filepath.ToSlash(filepath.Join("skills", string(skill))))
 	if err != nil {
 		return nil, err
 	}

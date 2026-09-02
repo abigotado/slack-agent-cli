@@ -4,13 +4,78 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/abigotado/slack-agent-cli/internal/contract"
 )
+
+func TestDestinationUsesClosedSkillNamesForBothProviders(t *testing.T) {
+	t.Parallel()
+	root := scratchDir(t)
+	for _, test := range []struct {
+		skill    Skill
+		provider Provider
+		want     string
+	}{
+		{SkillSlack, ProviderCodex, filepath.Join(".agents", "skills", "slack")},
+		{SkillAppProvisioning, ProviderCodex, filepath.Join(".agents", "skills", "slack-app-provisioning")},
+		{SkillSlack, ProviderClaude, filepath.Join(".claude", "skills", "slack")},
+		{SkillAppProvisioning, ProviderClaude, filepath.Join(".claude", "skills", "slack-app-provisioning")},
+	} {
+		destination, err := Destination(test.skill, test.provider, ScopeProject, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if destination != filepath.Join(root, test.want) {
+			t.Fatalf("skill=%s provider=%s destination=%q", test.skill, test.provider, destination)
+		}
+	}
+	if _, err := Destination(Skill("../../escape"), ProviderCodex, ScopeProject, root); err == nil {
+		t.Fatal("unknown Skill was accepted")
+	}
+}
+
+func TestProvisioningSkillPinsCanonicalAllChannelsManifestAndHooks(t *testing.T) {
+	t.Parallel()
+	files, err := canonicalFiles(SkillAppProvisioning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"SKILL.md",
+		"assets/manifests/all-channels-message-write.json",
+		"assets/scaffold/package-lock.json",
+		"references/commands.md",
+	} {
+		if _, ok := files[path]; !ok {
+			t.Fatalf("canonical file %q is absent", path)
+		}
+	}
+	var manifest struct {
+		OAuthConfig struct {
+			Scopes struct {
+				Bot []string `json:"bot"`
+			} `json:"scopes"`
+		} `json:"oauth_config"`
+	}
+	if err := json.Unmarshal(files["assets/manifests/all-channels-message-write.json"], &manifest); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"channels:history", "channels:read", "chat:write", "groups:history", "groups:read", "users:read"}
+	if !slices.Equal(manifest.OAuthConfig.Scopes.Bot, want) {
+		t.Fatalf("scopes=%v want=%v", manifest.OAuthConfig.Scopes.Bot, want)
+	}
+	lockfile := string(files["assets/scaffold/package-lock.json"])
+	if !strings.Contains(lockfile, `"version": "2.0.0"`) || !strings.Contains(lockfile, "sha512-VLxGqJZwbrH3S+ovRhqlrcrKWHRDJtn3toraZKAcLaPqca5CgqTa/PmiCvCq3uUowiFw9B7FOB0y3ikQoDppTw==") {
+		t.Fatal("canonical Slack CLI hooks lock is missing")
+	}
+}
 
 func scratchDir(t *testing.T) string {
 	t.Helper()
@@ -38,7 +103,7 @@ func TestDryRunDoesNotCreateDestination(t *testing.T) {
 	t.Parallel()
 	root := scratchDir(t)
 	destination := filepath.Join(root, "missing", "skills", "slack")
-	result, err := Install(context.Background(), destination, ProviderCodex, ScopeProject, false)
+	result, err := Install(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +124,7 @@ func TestCodexAndClaudeInstallIdenticalCanonicalBytes(t *testing.T) {
 		destination string
 		provider    Provider
 	}{{codex, ProviderCodex}, {claude, ProviderClaude}} {
-		result, err := Install(context.Background(), item.destination, item.provider, ScopeProject, true)
+		result, err := Install(context.Background(), SkillSlack, item.destination, item.provider, ScopeProject, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -89,17 +154,17 @@ func TestModifiedOwnedFileBlocksUpgradeAndUninstall(t *testing.T) {
 	t.Parallel()
 	root := scratchDir(t)
 	destination := filepath.Join(root, "skills", "slack")
-	if _, err := Install(context.Background(), destination, ProviderCodex, ScopeProject, true); err != nil {
+	if _, err := Install(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, true); err != nil {
 		t.Fatal(err)
 	}
 	skillFile := filepath.Join(destination, "SKILL.md")
 	if err := os.WriteFile(skillFile, []byte("modified"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Install(context.Background(), destination, ProviderCodex, ScopeProject, true); !errors.Is(err, ErrConflict) {
+	if _, err := Install(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, true); !errors.Is(err, ErrConflict) {
 		t.Fatalf("upgrade should conflict: %v", err)
 	}
-	if _, err := Uninstall(context.Background(), destination, ProviderCodex, ScopeProject, true); !errors.Is(err, ErrConflict) {
+	if _, err := Uninstall(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, true); !errors.Is(err, ErrConflict) {
 		t.Fatalf("uninstall should conflict: %v", err)
 	}
 	payload, err := os.ReadFile(skillFile)
@@ -122,7 +187,7 @@ func TestSymlinkDestinationRejected(t *testing.T) {
 	if err := os.Symlink(target, destination); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Install(context.Background(), destination, ProviderCodex, ScopeProject, true); !errors.Is(err, ErrConflict) {
+	if _, err := Install(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, true); !errors.Is(err, ErrConflict) {
 		t.Fatalf("symlink accepted: %v", err)
 	}
 }
@@ -139,7 +204,7 @@ func TestSymlinkParentRejectedWithoutCreatingOutsideAnchor(t *testing.T) {
 		t.Fatal(err)
 	}
 	destination := filepath.Join(linkedParent, "skills", "slack")
-	if _, err := Install(context.Background(), destination, ProviderCodex, ScopeProject, true); err == nil {
+	if _, err := Install(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, true); err == nil {
 		t.Fatal("symlink parent accepted")
 	}
 	if _, err := os.Stat(filepath.Join(outside, "skills")); !errors.Is(err, os.ErrNotExist) {
@@ -158,19 +223,19 @@ func TestOversizedManifestAndOwnedFileAreRejected(t *testing.T) {
 	if err := os.WriteFile(manifestPath, make([]byte, contract.MaxSkillManifestBytes+1), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Install(context.Background(), destination, ProviderCodex, ScopeProject, false); err == nil {
+	if _, err := Install(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, false); err == nil {
 		t.Fatal("oversized ownership manifest was accepted")
 	}
 	if err := os.RemoveAll(destination); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Install(context.Background(), destination, ProviderCodex, ScopeProject, true); err != nil {
+	if _, err := Install(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(destination, "SKILL.md"), make([]byte, contract.MaxSkillFileBytes+1), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Uninstall(context.Background(), destination, ProviderCodex, ScopeProject, false); !errors.Is(err, ErrConflict) {
+	if _, err := Uninstall(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, false); !errors.Is(err, ErrConflict) {
 		t.Fatalf("oversized owned file was accepted: %v", err)
 	}
 }
@@ -179,20 +244,20 @@ func TestInterruptedInstallAndUninstallStatesRecoverSafely(t *testing.T) {
 	t.Parallel()
 	root := scratchDir(t)
 	destination := filepath.Join(root, "skills", "slack")
-	if _, err := Install(context.Background(), destination, ProviderCodex, ScopeProject, true); err != nil {
+	if _, err := Install(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, true); err != nil {
 		t.Fatal(err)
 	}
 	backupSource := filepath.Join(root, "backup-source")
-	if _, err := Install(context.Background(), backupSource, ProviderCodex, ScopeProject, true); err != nil {
+	if _, err := Install(context.Background(), SkillSlack, backupSource, ProviderCodex, ScopeProject, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Rename(backupSource, destination+".previous"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Install(context.Background(), destination, ProviderCodex, ScopeProject, false); !errors.Is(err, ErrConflict) {
+	if _, err := Install(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, false); !errors.Is(err, ErrConflict) {
 		t.Fatalf("dry-run ignored interrupted install: %v", err)
 	}
-	if result, err := Install(context.Background(), destination, ProviderCodex, ScopeProject, true); err != nil || !result.Applied {
+	if result, err := Install(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, true); err != nil || !result.Applied {
 		t.Fatalf("install recovery result=%+v err=%v", result, err)
 	}
 	if _, err := os.Stat(destination + ".previous"); !errors.Is(err, os.ErrNotExist) {
@@ -201,10 +266,10 @@ func TestInterruptedInstallAndUninstallStatesRecoverSafely(t *testing.T) {
 	if err := os.Rename(destination, destination+".removing"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Uninstall(context.Background(), destination, ProviderCodex, ScopeProject, false); !errors.Is(err, ErrConflict) {
+	if _, err := Uninstall(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, false); !errors.Is(err, ErrConflict) {
 		t.Fatalf("dry-run ignored interrupted uninstall: %v", err)
 	}
-	if result, err := Uninstall(context.Background(), destination, ProviderCodex, ScopeProject, true); err != nil || !result.Applied || !result.Changed {
+	if result, err := Uninstall(context.Background(), SkillSlack, destination, ProviderCodex, ScopeProject, true); err != nil || !result.Applied || !result.Changed {
 		t.Fatalf("uninstall recovery result=%+v err=%v", result, err)
 	}
 }

@@ -1,0 +1,9 @@
+{
+  "name": "slack-agent-cli-provisioning-scaffold",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@slack/cli-hooks": "2.0.0"
+  }
+}

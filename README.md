@@ -17,7 +17,8 @@ boundary. The stable JSON and recovery contract is in
   network command requires `--profile NAME`.
 - Multiple named profiles may represent different workspaces or different
   accounts in the same workspace.
-- Tokens enter through bounded stdin and are stored only in macOS Keychain.
+- Tokens enter through bounded stdin or a hidden bounded controlling-terminal
+  prompt and are stored only in macOS Keychain.
   They never appear in argv, environment variables, registry files, logs,
   errors, or output.
 - Only fixed typed Slack Web API operations exist. There is no `api`,
@@ -81,29 +82,45 @@ release tag and commit in `slack-agent-cli version`.
 ## Create explicit profiles
 
 Create one Slack app/token with only the scopes needed by the typed commands.
+For public and private channels with message writes, use bot scopes
+`channels:history`, `channels:read`, `groups:history`, `groups:read`,
+`users:read`, and `chat:write`. The bot still needs membership in private
+channels and in any channel where it will write.
+
 The CLI verifies the token with `auth.test` before committing the profile.
-Provide the token as exactly one bounded stdin line:
+Enter it directly into the hidden controlling-terminal prompt:
 
 ```sh
-read -r -s SLACK_TOKEN_INPUT
-printf '%s\n' "$SLACK_TOKEN_INPUT" |
-  slack-agent-cli auth login \
-    --profile work \
-    --token-kind bot \
-    --capability read \
-    --capability message-write \
-    --token-stdin
-unset SLACK_TOKEN_INPUT
+slack-agent-cli auth login \
+  --profile bangr \
+  --token-kind bot \
+  --capability read \
+  --capability message-write \
+  --token-tty
 ```
 
-The shell variable in this example exists only in the interactive shell. The
-CLI does not read a token environment variable. For another account or
-workspace, repeat with another explicit profile name.
+`--token-stdin` remains available for a bounded secret pipe. The CLI never
+reads a token environment variable. For another account or workspace, repeat
+with another explicit profile name.
 
 ```sh
 slack-agent-cli auth list
-slack-agent-cli auth status --profile work
-slack-agent-cli auth status --profile work --check
+slack-agent-cli auth status --profile bangr
+slack-agent-cli auth status --profile bangr --check
+```
+
+## Install Agent Skills
+
+The runtime Skill and the separate app-provisioning Skill install from the
+same binary for either Codex or Claude Code. Review with `--dry-run`, then
+repeat with `--yes`:
+
+```sh
+slack-agent-cli skill install --skill slack --provider codex --scope user --dry-run
+slack-agent-cli skill install --skill slack --provider codex --scope user --yes
+
+slack-agent-cli skill install --skill slack-app-provisioning --provider codex --scope user --dry-run
+slack-agent-cli skill install --skill slack-app-provisioning --provider codex --scope user --yes
 ```
 
 ## Allow exact targets
