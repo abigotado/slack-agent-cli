@@ -1,2 +1,207 @@
 # slack-agent-cli
-Provider-neutral, bounded Slack CLI for coding agents
+
+`slack-agent-cli` is a provider-neutral, machine-oriented Slack boundary for
+Codex and Claude Code. It is deliberately smaller than a general Slack client:
+every network call selects one exact profile, every Slack operation is typed
+and bounded, content targets are allowlisted, and message writes use a local
+receipt plus exact confirmation.
+
+The [architecture](docs/architecture.md) explains why the official Slack CLI
+and Slack MCP remain useful developer tools but are not the enforcement
+boundary. The stable JSON and recovery contract is in
+[docs/contract.md](docs/contract.md).
+
+## Security model
+
+- No default, active, environment-selected, or inferred account exists. Every
+  network command requires `--profile NAME`.
+- Multiple named profiles may represent different workspaces or different
+  accounts in the same workspace.
+- Tokens enter through bounded stdin and are stored only in macOS Keychain.
+  They never appear in argv, environment variables, registry files, logs,
+  errors, or output.
+- Only fixed typed Slack Web API operations exist. There is no `api`,
+  `request`, `raw`, custom origin, arbitrary header, or arbitrary body
+  command.
+- Conversation reads and writes require exact ID policies bound to profile
+  identity and credential generation. Write targets must also be readable.
+- Slack-controlled names, topics, profiles, links, and messages are marked
+  `content_trust: "untrusted"`.
+- Message sends are dispatched once. An ambiguous outcome exits 9 and must be
+  reconciled, never automatically retried.
+
+See [SECURITY.md](SECURITY.md) for the local credential-boundary limitations.
+
+## Platform support
+
+The v0.1 runtime target is macOS because the credential store calls
+Security.framework directly. Linux is supported for source compilation and
+tests but has no credential backend. Windows support is deferred until it has a
+native credential store and lock boundary.
+
+## Install
+
+Go 1.25.14 or newer:
+
+```sh
+go install github.com/abigotado/slack-agent-cli/cmd/slack-agent-cli@v0.1.0
+slack-agent-cli version
+```
+
+Or build a checkout:
+
+```sh
+git clone https://github.com/abigotado/slack-agent-cli.git
+cd slack-agent-cli
+go build -o bin/slack-agent-cli ./cmd/slack-agent-cli
+./bin/slack-agent-cli contract
+```
+
+Published releases include a deterministic source bundle,
+`release-manifest.json`, and `SHA256SUMS`. No unsigned prebuilt macOS binary
+is distributed. Binaries built from the release source bundle retain the exact
+release tag and commit in `slack-agent-cli version`.
+
+## Create explicit profiles
+
+Create one Slack app/token with only the scopes needed by the typed commands.
+The CLI verifies the token with `auth.test` before committing the profile.
+Provide the token as exactly one bounded stdin line:
+
+```sh
+read -r -s SLACK_TOKEN_INPUT
+printf '%s\n' "$SLACK_TOKEN_INPUT" |
+  slack-agent-cli auth login \
+    --profile work \
+    --token-kind bot \
+    --capability read \
+    --capability message-write \
+    --token-stdin
+unset SLACK_TOKEN_INPUT
+```
+
+The shell variable in this example exists only in the interactive shell. The
+CLI does not read a token environment variable. For another account or
+workspace, repeat with another explicit profile name.
+
+```sh
+slack-agent-cli auth list
+slack-agent-cli auth status --profile work
+slack-agent-cli auth status --profile work --check
+```
+
+## Allow exact targets
+
+Policy changes replace the complete exact-ID set. Review the dry-run before
+applying the same set. Slack Connect targets require a separate explicit flag.
+
+```sh
+slack-agent-cli auth allow-reads set \
+  --profile work \
+  --conversation-id C0123456789 \
+  --dry-run
+
+slack-agent-cli auth allow-reads set \
+  --profile work \
+  --conversation-id C0123456789 \
+  --yes
+
+slack-agent-cli auth allow-writes set \
+  --profile work \
+  --conversation-id C0123456789 \
+  --dry-run
+
+slack-agent-cli auth allow-writes set \
+  --profile work \
+  --conversation-id C0123456789 \
+  --yes
+```
+
+## Bounded reads
+
+Collection reads require a limit from 1 through 100. Start small and follow the
+opaque `meta.next_cursor` only while the task requires more data.
+
+```sh
+slack-agent-cli conversations list \
+  --profile work \
+  --types public_channel,private_channel \
+  --limit 25
+
+slack-agent-cli messages history \
+  --profile work \
+  --conversation-id C0123456789 \
+  --limit 25
+```
+
+Normal output is one compact v1 JSON envelope:
+
+```json
+{"ok":true,"v":1,"data":[],"meta":{"profile":"work","workspace_id":"T123","content_trust":"untrusted","count":0}}
+```
+
+## Guarded writes
+
+Message text is bounded plain text from stdin. First produce a local receipt;
+this step does not access Keychain or Slack and does not echo the text:
+
+```sh
+printf '%s' 'Deployment complete.' |
+  slack-agent-cli messages send \
+    --profile work \
+    --conversation-id C0123456789 \
+    --text-stdin \
+    --dry-run
+```
+
+After reviewing the exact receipt, repeat the identical input with its
+`intent_sha256`:
+
+```sh
+printf '%s' 'Deployment complete.' |
+  slack-agent-cli messages send \
+    --profile work \
+    --conversation-id C0123456789 \
+    --text-stdin \
+    --confirm-intent EXACT_SHA256_FROM_RECEIPT \
+    --yes
+```
+
+Never retry a send after exit 9 or `WRITE_OUTCOME_UNKNOWN`.
+
+## Install the Agent Skill
+
+The binary embeds one canonical Skill and writes identical content for either
+provider. Inspect the local plan first:
+
+```sh
+slack-agent-cli skill install --provider codex --scope user --dry-run
+slack-agent-cli skill install --provider codex --scope user --yes
+
+slack-agent-cli skill install --provider claude --scope user --dry-run
+slack-agent-cli skill install --provider claude --scope user --yes
+```
+
+Project scope additionally requires an explicit `--project-dir`. The
+installer tracks owned hashes and refuses to overwrite modified, symlinked, or
+unowned destinations.
+
+## Development
+
+```sh
+test -z "$(gofmt -l .)"
+go mod verify
+go test ./...
+go test -race ./...
+go vet ./...
+staticcheck ./...
+govulncheck ./...
+gitleaks dir . --redact
+gitleaks git . --redact
+actionlint
+shellcheck tools/release/*.sh
+tools/release/test-source-bundle.sh
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before changing the machine, credential,
+transport, policy, or write-recovery boundary.

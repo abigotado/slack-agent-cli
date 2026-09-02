@@ -1,0 +1,90 @@
+name: go
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Format
+        shell: bash
+        run: test -z "$(gofmt -l .)"
+      - name: Verify module checksums
+        run: go mod verify
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./...
+      - name: Race tests
+        run: go test -race -count=1 ./...
+      - name: Release tooling tests
+        shell: bash
+        run: |
+          tools/release/test-source-bundle.sh
+          tools/release/test-production-source-bundle.sh
+      - name: Shell lint
+        if: runner.os == 'Linux'
+        run: shellcheck tools/release/*.sh
+      - name: macOS install smoke test
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GOBIN="$RUNNER_TEMP/bin"
+          go install ./cmd/slack-agent-cli
+          "$GOBIN/slack-agent-cli" version |
+            jq -e --arg commit "$GITHUB_SHA" \
+              '.ok == true and .v == 1 and .data.commit == $commit and (.data.version | strings | length > 0)' >/dev/null
+      - name: Linux build smoke test
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$RUNNER_TEMP/slack-agent-cli-linux-amd64" ./cmd/slack-agent-cli
+      - name: Static and vulnerability checks
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      - name: Workflow lint
+        if: runner.os == 'Linux'
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: Secret scan
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run github.com/zricethezav/gitleaks/v8@v8.30.1 dir . --redact --no-banner
+          go run github.com/zricethezav/gitleaks/v8@v8.30.1 git . --redact --no-banner
+
+  build-and-test:
+    name: Build and test
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Confirm platform validation
+        run: echo "All required validation passed."
