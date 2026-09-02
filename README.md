@@ -59,7 +59,8 @@ go build -o bin/slack-agent-cli ./cmd/slack-agent-cli
 
 Published releases include a deterministic source bundle,
 `release-manifest.json`, and `SHA256SUMS`. No unsigned prebuilt macOS binary
-is distributed.
+is distributed. Binaries built from the release source bundle retain the exact
+release tag and commit in `slack-agent-cli version`.
 
 ## Create explicit profiles
 

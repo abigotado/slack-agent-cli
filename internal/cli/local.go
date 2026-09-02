@@ -18,25 +18,46 @@ func newVersionCommand(dependencies Dependencies) *cobra.Command {
 
 func buildIdentity() (string, string) {
 	info, ok := debug.ReadBuildInfo()
-	return resolveBuildIdentity(info, ok)
+	return resolveBuildIdentity(info, ok, archiveVersion, archiveCommit)
 }
 
-func resolveBuildIdentity(info *debug.BuildInfo, ok bool) (string, string) {
+func resolveBuildIdentity(info *debug.BuildInfo, ok bool, fallbackVersion, fallbackCommit string) (string, string) {
 	version := "dev"
 	commit := "none"
-	if !ok || info == nil {
-		return version, commit
-	}
-	if info.Main.Version != "" && info.Main.Version != "(devel)" {
-		version = info.Main.Version
-	}
-	for _, setting := range info.Settings {
-		if setting.Key == "vcs.revision" && setting.Value != "" {
-			commit = setting.Value
-			break
+	if ok && info != nil {
+		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+			version = info.Main.Version
+		}
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" && setting.Value != "" {
+				commit = setting.Value
+				break
+			}
 		}
 	}
+	if version == "dev" && validArchiveVersion(fallbackVersion) {
+		version = fallbackVersion
+	}
+	if commit == "none" && validArchiveCommit(fallbackCommit) {
+		commit = fallbackCommit
+	}
 	return version, commit
+}
+
+func validArchiveVersion(value string) bool {
+	return len(value) > 1 && value[0] == 'v' && value != archiveVersionPlaceholder
+}
+
+func validArchiveCommit(value string) bool {
+	if len(value) != 40 || value == archiveCommitPlaceholder {
+		return false
+	}
+	for _, character := range value {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func newContractCommand(dependencies Dependencies) *cobra.Command {

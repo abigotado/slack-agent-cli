@@ -10,15 +10,19 @@ cleanup() {
 trap cleanup EXIT
 
 repository="$temporary_dir/repository"
-mkdir -p "$repository/assets/skills/slack" "$repository/cmd/slack-agent-cli" "$repository/docs/releases"
+mkdir -p "$repository/assets/skills/slack" "$repository/cmd/slack-agent-cli" "$repository/docs/releases" "$repository/internal/cli"
 cd "$repository"
 git init -q -b main
 git config user.name "Release Test"
 git config user.email "release-test@example.invalid"
 printf 'module example.invalid/slack-agent-cli\n\ngo 1.25.0\n' >go.mod
-printf 'fixture checksums\n' >go.sum
+printf '' >go.sum
 printf 'MIT\n' >LICENSE
-printf 'package main\n\nfunc main() {}\n' >cmd/slack-agent-cli/main.go
+printf 'internal/cli/archive.go export-subst\n' >.gitattributes
+# The literal Git archive placeholders must survive fixture creation.
+# shellcheck disable=SC2016
+printf 'package cli\n\nconst Version = "$Format:%%(describe:tags)$"\nconst Commit = "$Format:%%H$"\n' >internal/cli/archive.go
+printf 'package main\n\nimport (\n  "fmt"\n  "example.invalid/slack-agent-cli/internal/cli"\n)\n\nfunc main() { fmt.Printf("%%s %%s", cli.Version, cli.Commit) }\n' >cmd/slack-agent-cli/main.go
 printf '# fixture Skill\n' >assets/skills/slack/SKILL.md
 printf '# Changelog\n\n## [0.1.0] - 2026-09-02\n' >CHANGELOG.md
 printf '# v0.1.0\n' >docs/releases/v0.1.0.md
@@ -45,6 +49,19 @@ if grep -Eq '(^|/)\.git(/|$)|(^|/)outputs(/|$)|(^|/)work(/|$)' "$temporary_dir/e
   exit 1
 fi
 
+extracted="$temporary_dir/extracted"
+mkdir -p "$extracted"
+tar -xzf "$first/slack-agent-cli-0.1.0.tar.gz" -C "$extracted"
+(
+  cd "$extracted/slack-agent-cli-0.1.0"
+  GOWORK=off go build -o "$temporary_dir/source-binary" ./cmd/slack-agent-cli
+)
+source_identity=$("$temporary_dir/source-binary")
+if [[ $source_identity != "v0.1.0 $commit" ]]; then
+  echo "source archive build identity mismatch: $source_identity" >&2
+  exit 1
+fi
+
 jq -e --arg commit "$commit" '
   .schema == 1 and
   .tag == "v0.1.0" and
@@ -61,6 +78,24 @@ if command -v sha256sum >/dev/null 2>&1; then
 else
   (cd "$first" && shasum -a 256 -c SHA256SUMS >/dev/null)
 fi
+
+fake_bin="$temporary_dir/fake-bin"
+mkdir -p "$fake_bin"
+printf '#!/usr/bin/env bash\nexit 23\n' >"$fake_bin/jq"
+chmod +x "$fake_bin/jq"
+fault_output="$temporary_dir/fault-output"
+if PATH="$fake_bin:$PATH" "$bundle_script" v0.1.0 "$commit" "$fault_output" >/dev/null 2>&1; then
+  echo "injected late failure unexpectedly succeeded" >&2
+  exit 1
+fi
+if [[ -e $fault_output || -L $fault_output ]]; then
+  echo "late failure exposed partial final assets" >&2
+  exit 1
+fi
+"$bundle_script" v0.1.0 "$commit" "$fault_output" >/dev/null
+for asset in slack-agent-cli-0.1.0.tar.gz release-manifest.json SHA256SUMS; do
+  [[ -f $fault_output/$asset ]]
+done
 
 if "$bundle_script" invalid "$commit" "$temporary_dir/invalid" >/dev/null 2>&1; then
   echo "invalid tag was accepted" >&2

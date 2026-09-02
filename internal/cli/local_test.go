@@ -11,6 +11,8 @@ func TestResolveBuildIdentity(t *testing.T) {
 		name        string
 		info        *debug.BuildInfo
 		ok          bool
+		fallback    string
+		fallbackSHA string
 		wantVersion string
 		wantCommit  string
 	}{
@@ -29,12 +31,35 @@ func TestResolveBuildIdentity(t *testing.T) {
 			wantVersion: "v0.1.0",
 			wantCommit:  "none",
 		},
+		{
+			name:        "source archive",
+			info:        &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}},
+			ok:          true,
+			fallback:    "v0.1.0",
+			fallbackSHA: "0123456789abcdef0123456789abcdef01234567",
+			wantVersion: "v0.1.0",
+			wantCommit:  "0123456789abcdef0123456789abcdef01234567",
+		},
+		{
+			name:        "unexpanded archive placeholders",
+			fallback:    archiveVersionPlaceholder,
+			fallbackSHA: archiveCommitPlaceholder,
+			wantVersion: "dev",
+			wantCommit:  "none",
+		},
+		{
+			name:        "invalid archive metadata",
+			fallback:    "release",
+			fallbackSHA: "not-a-commit",
+			wantVersion: "dev",
+			wantCommit:  "none",
+		},
 	}
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			version, commit := resolveBuildIdentity(test.info, test.ok)
+			version, commit := resolveBuildIdentity(test.info, test.ok, test.fallback, test.fallbackSHA)
 			if version != test.wantVersion || commit != test.wantCommit {
 				t.Fatalf("got (%q, %q), want (%q, %q)", version, commit, test.wantVersion, test.wantCommit)
 			}
