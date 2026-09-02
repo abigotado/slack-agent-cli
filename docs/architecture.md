@@ -135,6 +135,8 @@ automation, or raw HTTP for an unsupported operation.
 pins an official Slack CLI version, scaffold, lockfile, and three exact
 least-privilege manifests. Agents may perform bounded local inspection and
 validation in a minimal clean environment with Slack CLI telemetry explicitly
-disabled. Slack login, app installation, and runtime token entry remain
+disabled. The clean environment derives its home from the operating-system
+account record, not caller environment state, and agent invocations use direct
+argv vectors. Slack login, app installation, and runtime token entry remain
 human-only terminal handoffs. This administrative surface is not available to
 the runtime Slack Skill.

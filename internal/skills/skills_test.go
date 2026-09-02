@@ -52,6 +52,7 @@ func TestProvisioningSkillPinsCanonicalAllChannelsManifestAndHooks(t *testing.T)
 		"assets/manifests/all-channels-message-write.json",
 		"assets/scaffold/package-lock.json",
 		"references/commands.md",
+		"references/environment-cases.md",
 	} {
 		if _, ok := files[path]; !ok {
 			t.Fatalf("canonical file %q is absent", path)
@@ -92,8 +93,20 @@ func TestProvisioningSkillPinsCanonicalAllChannelsManifestAndHooks(t *testing.T)
 			t.Fatalf("official Slack CLI environment gate is missing %s", name)
 		}
 	}
-	if !strings.Contains(commands, "/usr/bin/env -i HOME=ABSOLUTE_HOME") || !strings.Contains(commands, "SLACK_DISABLE_TELEMETRY=1 ABSOLUTE_SLACK_BIN") {
+	if !strings.Contains(commands, "getpwuid(getuid())") || !strings.Contains(commands, "Require caller `HOME` to equal `CANONICAL_HOME` exactly") {
+		t.Fatal("canonical home derivation is missing")
+	}
+	if !strings.Contains(commands, "/usr/bin/env -i HOME=CANONICAL_HOME") || !strings.Contains(commands, "SLACK_DISABLE_TELEMETRY=1 ABSOLUTE_SLACK_BIN") {
 		t.Fatal("sanitized Slack CLI environment is missing")
+	}
+	if !strings.Contains(commands, "direct argv vector") || !strings.Contains(commands, "path containing whitespace or metacharacters") {
+		t.Fatal("safe argv and human quoting requirements are missing")
+	}
+	environmentCases := string(files["references/environment-cases.md"])
+	for _, adversarialCase := range []string{"another existing, current-user-owned directory", "spaces or shell metacharacters", "contains a single quote", "accepts only a shell command string"} {
+		if !strings.Contains(environmentCases, adversarialCase) {
+			t.Fatalf("environment adversarial case %q is missing", adversarialCase)
+		}
 	}
 	for _, line := range strings.Split(commands, "\n") {
 		if strings.Contains(line, "--skip-update --no-color") && !strings.HasPrefix(line, "SANITIZED_PREFIX ") {

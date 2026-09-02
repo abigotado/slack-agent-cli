@@ -31,7 +31,16 @@ SLACK_USER_TOKEN
 ```
 
 Any match stops the workflow and reports only the refused variable name.
-Validate that `HOME` is an absolute real directory without symlink components.
+
+Derive `CANONICAL_HOME` from the operating system account record for the
+current numeric UID (`getpwuid(getuid())`), never from `HOME`, a shell, or a
+caller-provided path. Require caller `HOME` to equal `CANONICAL_HOME` exactly.
+Require the canonical path to be absolute, already normalized, free of symlink
+components, owned by the current UID, and not group- or world-writable. Apply
+the same ownership and write-permission checks to an existing `.slack`
+directory without reading any file in it. A mismatch or lookup ambiguity stops
+the workflow.
+
 Resolve `SLACK_BIN` to the Homebrew-installed official binary at exactly
 `/opt/homebrew/bin/slack` or `/usr/local/bin/slack`; stop for any other path.
 
@@ -39,7 +48,7 @@ Every permitted invocation uses this exact sanitized prefix, with the verified
 absolute values substituted before display or execution:
 
 ```text
-/usr/bin/env -i HOME=ABSOLUTE_HOME \
+/usr/bin/env -i HOME=CANONICAL_HOME \
   PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin LC_ALL=C \
   SLACK_DISABLE_TELEMETRY=1 ABSOLUTE_SLACK_BIN
 ```
@@ -47,6 +56,13 @@ absolute values substituted before display or execution:
 The fixed `SLACK_DISABLE_TELEMETRY=1` is injected only after rejecting the
 caller's environment. It prevents the canonical scaffold `project_id` from
 being transmitted as telemetry and is mandatory for agent and human commands.
+
+For agent-executed reads, pass the prefix and command as a direct argv vector;
+never concatenate a shell command. If the execution boundary accepts only a
+shell string, stop at the human handoff. For a human-only command, substitute
+the verified paths and POSIX single-quote every dynamic argument, including a
+path containing whitespace or metacharacters. A single quote inside a value is
+encoded as `'"'"'`; display the fully quoted command before stopping.
 
 ## Agent-executed allowlist
 

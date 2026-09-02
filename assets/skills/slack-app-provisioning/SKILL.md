@@ -42,7 +42,9 @@ interactive lifecycle mutation from an agent-captured session.
 4. Verify all canonical file digests. Ask before the one supply-chain step,
    then run the exact locked `npm ci` command from the scaffold root.
 5. Run the environment and version gates, local manifest inspection, and
-   manifest validation with bounded stdout and stderr.
+   manifest validation with bounded stdout and stderr. Apply the adversarial
+   cases in [references/environment-cases.md](references/environment-cases.md)
+   before the first Slack CLI invocation.
 6. Show the Team ID, selected capability set, manifest digest, and exact
    human-only install command. Stop so the operator can run it directly.
 7. Apply [references/state-machine.md](references/state-machine.md) to reported
