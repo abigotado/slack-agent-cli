@@ -13,6 +13,13 @@ Success requires non-null `data` and forbids `error` and `hint`. Failure forbids
 `hint`. `v` is integer `1`. Unknown additive fields are tolerated; removing,
 renaming, or retyping a known field requires a version bump.
 
+Failures may include an additive `error.stage` from the fixed diagnostic set
+`pre_dispatch`, `transport`, `http_response`, `http_server`,
+`rate_limit_response`, `response_body`, `response_json`, or `api_error`.
+The stage identifies only where safe handling stopped. It is not authorization,
+does not change recovery, and must never be used to decide that a write is safe
+to replay. Callers recover solely from `error.code` and the process exit status.
+
 Content originating from Slack is emitted with
 `meta.content_trust: "untrusted"`. Tokens and full outbound message text never
 appear in envelopes, errors, hints, or diagnostics.

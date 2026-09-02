@@ -81,6 +81,76 @@ func TestSlackFailuresAreBoundedAndRedacted(t *testing.T) {
 	}
 }
 
+func TestReadFailureStagesAreFixedAndRedacted(t *testing.T) {
+	t.Parallel()
+	const sentinel = "xoxb-super-secret"
+	tests := []struct {
+		name           string
+		stage          errx.Stage
+		handler        http.HandlerFunc
+		transportError bool
+		cancelBefore   bool
+	}{
+		{name: "pre-dispatch", stage: errx.StagePreDispatch, cancelBefore: true},
+		{name: "transport", stage: errx.StageTransport, transportError: true},
+		{name: "server", stage: errx.StageHTTPServer, handler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}},
+		{name: "rate limit response", stage: errx.StageRateLimitResponse, handler: func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Retry-After", "invalid")
+			w.WriteHeader(http.StatusTooManyRequests)
+		}},
+		{name: "response body", stage: errx.StageResponseBody, handler: func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Encoding", "gzip")
+			_, _ = w.Write([]byte("not-gzip"))
+		}},
+		{name: "response JSON", stage: errx.StageResponseJSON, handler: func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("{"))
+		}},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			var client *Client
+			var closeServer func()
+			if test.transportError {
+				httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					return nil, errors.New("transport failed with " + sentinel)
+				})}
+				client = newTestClient("https://slack.invalid", httpClient)
+			} else {
+				handler := test.handler
+				if handler == nil {
+					handler = func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
+				}
+				server := httptest.NewServer(handler)
+				closeServer = server.Close
+				client = newTestClient(server.URL, server.Client())
+			}
+			if closeServer != nil {
+				defer closeServer()
+			}
+			ctx := context.Background()
+			if test.cancelBefore {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+			_, err := client.AuthTest(ctx, Token(sentinel))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			typed := errx.As(err)
+			if typed.Exit != errx.Retryable || typed.Code != "SLACK_READ_FAILED" || typed.Stage != test.stage {
+				t.Fatalf("error=%+v", typed)
+			}
+			if strings.Contains(typed.Error(), sentinel) || strings.Contains(typed.Message, sentinel) || strings.Contains(string(typed.Stage), sentinel) {
+				t.Fatal("secret leaked")
+			}
+		})
+	}
+}
+
 func TestCompressedAndDecompressedBounds(t *testing.T) {
 	t.Parallel()
 	var compressed bytes.Buffer
@@ -176,6 +246,71 @@ func TestPostMessageIsOneShotAndDisablesUnfurls(t *testing.T) {
 	}
 }
 
+func TestPostDispatchFailuresRemainOneShotConflicts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name           string
+		stage          errx.Stage
+		handler        http.HandlerFunc
+		transportError bool
+	}{
+		{name: "transport", stage: errx.StageTransport, transportError: true},
+		{name: "server", stage: errx.StageHTTPServer, handler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}},
+		{name: "malformed JSON", stage: errx.StageResponseJSON, handler: func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("{"))
+		}},
+		{name: "bad gzip", stage: errx.StageResponseBody, handler: func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Encoding", "gzip")
+			_, _ = w.Write([]byte("not-gzip"))
+		}},
+		{name: "invalid retry after", stage: errx.StageRateLimitResponse, handler: func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Retry-After", "invalid")
+			w.WriteHeader(http.StatusTooManyRequests)
+		}},
+		{name: "unknown API error", stage: errx.StageAPIError, handler: func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"ok":false,"error":"unexpected_failure"}`))
+		}},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			var client *Client
+			var closeServer func()
+			if test.transportError {
+				httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					calls++
+					return nil, errors.New("transport failed")
+				})}
+				client = newTestClient("https://slack.invalid", httpClient)
+			} else {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					test.handler(w, r)
+				}))
+				closeServer = server.Close
+				client = newTestClient(server.URL, server.Client())
+			}
+			if closeServer != nil {
+				defer closeServer()
+			}
+			_, err := client.PostMessage(context.Background(), Token("sentinel"), PostOptions{ConversationID: "C1", Text: "hello"})
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			typed := errx.As(err)
+			if typed.Exit != errx.Conflict || typed.Code != "WRITE_OUTCOME_UNKNOWN" || typed.Stage != test.stage {
+				t.Fatalf("error=%+v", typed)
+			}
+			if calls != 1 {
+				t.Fatalf("write dispatched %d times", calls)
+			}
+		})
+	}
+}
+
 func TestPostMessageNonCommittingErrorAllowlist(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -206,4 +341,10 @@ func TestPostMessageEnforcesV1InputAtTransportBoundary(t *testing.T) {
 			t.Fatalf("options=%+v error=%v", options, err)
 		}
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
 }

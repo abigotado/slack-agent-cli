@@ -286,18 +286,18 @@ func (c *Client) call(ctx context.Context, token Token, method, route string, va
 	}
 	if err := ctx.Err(); err != nil {
 		if class == writeOperation {
-			return errx.New(errx.Conflict, "WRITE_NOT_STARTED", "write was cancelled before dispatch", "create a fresh dry-run before deciding whether to send").Wrap(err)
+			return errx.New(errx.Conflict, "WRITE_NOT_STARTED", "write was cancelled before dispatch", "create a fresh dry-run before deciding whether to send").WithStage(errx.StagePreDispatch).Wrap(err)
 		}
-		return networkError(class, err)
+		return networkError(class, errx.StagePreDispatch, err)
 	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return networkError(class, err)
+		return networkError(class, errx.StageTransport, err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode >= 300 && response.StatusCode < 400 {
 		if class == writeOperation {
-			return networkError(class, errors.New("slack redirect after dispatch"))
+			return networkError(class, errx.StageHTTPResponse, errors.New("slack redirect after dispatch"))
 		}
 		return errx.New(errx.Internal, "REDIRECT_REJECTED", "Slack redirect was rejected", "report unexpected Slack endpoint behavior")
 	}
@@ -305,7 +305,7 @@ func (c *Client) call(ctx context.Context, token Token, method, route string, va
 		return retryAfterError(response.Header.Get("Retry-After"), class)
 	}
 	if response.StatusCode >= 500 {
-		return networkError(class, errors.New("slack server failure"))
+		return networkError(class, errx.StageHTTPServer, errors.New("slack server failure"))
 	}
 	if response.StatusCode == http.StatusUnauthorized {
 		return errx.New(errx.Auth, "SLACK_AUTH_REJECTED", "Slack rejected the credential", "login or rotate this profile")
@@ -315,25 +315,25 @@ func (c *Client) call(ctx context.Context, token Token, method, route string, va
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		if class == writeOperation {
-			return networkError(class, errors.New("unexpected Slack write HTTP status"))
+			return networkError(class, errx.StageHTTPResponse, errors.New("unexpected Slack write HTTP status"))
 		}
 		return errx.New(errx.Internal, "SLACK_HTTP_ERROR", "Slack returned an unexpected HTTP status", "report this response class")
 	}
 	payload, err := readResponse(response)
 	if err != nil {
-		return networkError(class, err)
+		return networkError(class, errx.StageResponseBody, err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	if err := decoder.Decode(target); err != nil {
-		return networkError(class, err)
+		return networkError(class, errx.StageResponseJSON, err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return networkError(class, errors.New("slack response contains trailing data"))
+		return networkError(class, errx.StageResponseJSON, errors.New("slack response contains trailing data"))
 	}
 	var base apiBase
 	if err := json.Unmarshal(payload, &base); err != nil {
-		return networkError(class, err)
+		return networkError(class, errx.StageResponseJSON, err)
 	}
 	if !base.OK {
 		return slackError(base.Error, class)
@@ -395,20 +395,20 @@ func validateRequestedLimit(limit int) error {
 	return nil
 }
 
-func networkError(class operationClass, cause error) error {
+func networkError(class operationClass, stage errx.Stage, cause error) error {
 	if class == writeOperation {
-		return errx.New(errx.Conflict, "WRITE_OUTCOME_UNKNOWN", "Slack write outcome is unknown", "reconcile with a bounded read; never retry automatically").Wrap(cause)
+		return errx.New(errx.Conflict, "WRITE_OUTCOME_UNKNOWN", "Slack write outcome is unknown", "reconcile with a bounded read; never retry automatically").WithStage(stage).Wrap(cause)
 	}
-	return errx.New(errx.Retryable, "SLACK_READ_FAILED", "Slack read failed safely", "retry the bounded read with backoff").Wrap(cause)
+	return errx.New(errx.Retryable, "SLACK_READ_FAILED", "Slack read failed safely", "retry the bounded read with backoff").WithStage(stage).Wrap(cause)
 }
 
 func retryAfterError(value string, class operationClass) error {
 	seconds, err := strconv.Atoi(value)
 	if err != nil || seconds < contract.MinRetryAfterSeconds || seconds > contract.MaxRetryAfterSeconds {
-		return networkError(class, errors.New("invalid Retry-After"))
+		return networkError(class, errx.StageRateLimitResponse, errors.New("invalid Retry-After"))
 	}
 	if class == writeOperation {
-		return networkError(class, errors.New("write rate limited after dispatch"))
+		return networkError(class, errx.StageRateLimitResponse, errors.New("write rate limited after dispatch"))
 	}
 	result := errx.New(errx.Retryable, "SLACK_RATE_LIMITED", "Slack rate limited the read", "wait retry_after_seconds, then retry the same bounded read")
 	result.RetryAfter = time.Duration(seconds) * time.Second
@@ -427,7 +427,7 @@ func slackError(code string, class operationClass) error {
 		case "msg_too_long", "no_text", "invalid_blocks":
 			return errx.New(errx.Usage, "SLACK_WRITE_REJECTED", "Slack rejected the message before committing it", "fix the bounded message input")
 		default:
-			return networkError(class, fmt.Errorf("slack write error class %s", safeSlackCode(code)))
+			return networkError(class, errx.StageAPIError, fmt.Errorf("slack write error class %s", safeSlackCode(code)))
 		}
 	}
 	switch code {
@@ -438,7 +438,7 @@ func slackError(code string, class operationClass) error {
 	case "missing_scope", "not_allowed_token_type", "restricted_action", "access_denied":
 		return errx.New(errx.PermissionDenied, "SLACK_PERMISSION_DENIED", "Slack denied the operation", "request the required Slack scope or permission")
 	case "ratelimited", "internal_error", "fatal_error":
-		return errx.New(errx.Retryable, "SLACK_READ_RETRYABLE", "Slack could not complete the read", "retry the bounded read with backoff")
+		return errx.New(errx.Retryable, "SLACK_READ_RETRYABLE", "Slack could not complete the read", "retry the bounded read with backoff").WithStage(errx.StageAPIError)
 	default:
 		return errx.New(errx.Internal, "SLACK_API_ERROR", "Slack returned an unsupported API error", "report the error class without retrying unchanged")
 	}

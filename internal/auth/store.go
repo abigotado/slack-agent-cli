@@ -2,7 +2,6 @@
 package auth
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,8 +10,6 @@ import (
 	"io"
 	"slices"
 	"sort"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/abigotado/slack-agent-cli/internal/contract"
 	"github.com/abigotado/slack-agent-cli/internal/profile"
@@ -70,25 +67,22 @@ func ReadToken(reader io.Reader) (string, error) {
 	return validateTokenPayload(payload)
 }
 
+// ValidateToken applies the canonical secret-input byte boundary to an
+// already-read token.
+func ValidateToken(token string) (string, error) {
+	return validateTokenPayload([]byte(token))
+}
+
 func validateTokenPayload(payload []byte) (string, error) {
 	payload = bytes.TrimSuffix(payload, []byte{'\n'})
 	payload = bytes.TrimSuffix(payload, []byte{'\r'})
 	if len(payload) == 0 || len(payload) > contract.MaxTokenBytes || bytes.ContainsAny(payload, "\r\n\x00") {
 		return "", errors.New("token input must be exactly one non-empty line")
 	}
-	if !utf8.Valid(payload) {
-		return "", errors.New("token input must be valid UTF-8")
-	}
-	scanner := bufio.NewScanner(bytes.NewReader(payload))
-	scanner.Split(bufio.ScanRunes)
-	for scanner.Scan() {
-		r, _ := utf8.DecodeRune(scanner.Bytes())
-		if unicode.IsSpace(r) || unicode.IsControl(r) {
-			return "", errors.New("token input contains whitespace or control characters")
+	for _, value := range payload {
+		if value < 0x21 || value > 0x7e {
+			return "", errors.New("token input must contain printable ASCII without spaces")
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("scan token input: %w", err)
 	}
 	return string(payload), nil
 }

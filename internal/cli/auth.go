@@ -63,6 +63,9 @@ func newAuthLoginCommand(dependencies Dependencies) *cobra.Command {
 		} else {
 			token, err = auth.ReadToken(dependencies.Input)
 		}
+		if err == nil {
+			token, err = auth.ValidateToken(token)
+		}
 		if err != nil {
 			return usageError("INVALID_TOKEN_INPUT", "token input is invalid", err)
 		}

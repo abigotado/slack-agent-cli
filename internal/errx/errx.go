@@ -10,6 +10,10 @@ import (
 // Exit is a stable process status whose value identifies caller recovery.
 type Exit int
 
+// Stage is a fixed, non-secret diagnostic location. Recovery never depends on
+// it.
+type Stage string
+
 const (
 	OK Exit = iota
 	Internal
@@ -23,12 +27,32 @@ const (
 	Conflict
 )
 
+const (
+	// StagePreDispatch means cancellation was observed before an HTTP dispatch.
+	StagePreDispatch Stage = "pre_dispatch"
+	// StageTransport means the HTTP transport did not return a response.
+	StageTransport Stage = "transport"
+	// StageHTTPResponse means Slack returned an unexpected non-server status.
+	StageHTTPResponse Stage = "http_response"
+	// StageHTTPServer means Slack returned a server-error status.
+	StageHTTPServer Stage = "http_server"
+	// StageRateLimitResponse means Slack returned an unusable rate-limit response.
+	StageRateLimitResponse Stage = "rate_limit_response"
+	// StageResponseBody means the bounded response body could not be read.
+	StageResponseBody Stage = "response_body"
+	// StageResponseJSON means the bounded response was not one valid JSON object.
+	StageResponseJSON Stage = "response_json"
+	// StageAPIError means Slack returned an API error outside the typed allowlist.
+	StageAPIError Stage = "api_error"
+)
+
 // Error is safe for the machine envelope. Cause is diagnostic-only.
 type Error struct {
 	Exit       Exit
 	Code       string
 	Message    string
 	Hint       string
+	Stage      Stage
 	RetryAfter time.Duration
 	cause      error
 }
@@ -40,6 +64,14 @@ func (e *Error) Unwrap() error { return e.cause }
 func (e *Error) Wrap(cause error) *Error {
 	clone := *e
 	clone.cause = cause
+	return &clone
+}
+
+// WithStage adds a fixed, non-secret diagnostic stage without changing
+// recovery semantics.
+func (e *Error) WithStage(stage Stage) *Error {
+	clone := *e
+	clone.Stage = stage
 	return &clone
 }
 

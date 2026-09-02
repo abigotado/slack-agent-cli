@@ -25,6 +25,7 @@ type Meta struct {
 type ErrorBody struct {
 	Code       string `json:"code"`
 	Message    string `json:"message"`
+	Stage      string `json:"stage,omitempty"`
 	RetryAfter int    `json:"retry_after_seconds,omitempty"`
 }
 
@@ -76,7 +77,7 @@ func (w *Writer) ConfirmedWriteSuccess(data any, meta *Meta) error {
 // Failure emits exactly one compact failure envelope and returns its status.
 func (w *Writer) Failure(failure error) errx.Exit {
 	typed := errx.As(failure)
-	body := &ErrorBody{Code: typed.Code, Message: typed.Message}
+	body := &ErrorBody{Code: typed.Code, Message: typed.Message, Stage: string(typed.Stage)}
 	if typed.RetryAfter > 0 {
 		body.RetryAfter = int(typed.RetryAfter.Seconds())
 	}

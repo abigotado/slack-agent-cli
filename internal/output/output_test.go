@@ -63,6 +63,27 @@ func TestSecretNeverAppearsInUnknownFailure(t *testing.T) {
 	}
 }
 
+func TestFailureIncludesOnlyFixedDiagnosticStage(t *testing.T) {
+	t.Parallel()
+	const secret = "xoxb-secret"
+	var stdout bytes.Buffer
+	writer := &Writer{Out: &stdout, Err: &bytes.Buffer{}}
+	failure := errx.New(errx.Retryable, "SLACK_READ_FAILED", "Slack read failed safely", "retry the bounded read with backoff").WithStage(errx.StageTransport).Wrap(errors.New(secret))
+	if exit := writer.Failure(failure); exit != errx.Retryable {
+		t.Fatalf("exit %d", exit)
+	}
+	var envelope Envelope
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error == nil || envelope.Error.Stage != "transport" {
+		t.Fatalf("unexpected envelope: %s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), secret) {
+		t.Fatal("wrapped cause leaked")
+	}
+}
+
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
