@@ -41,10 +41,12 @@ returns not-found or permission-denied under a bot profile, do not retry other
 fixed methods or claim that `auth login --token-kind user` alone fixes access.
 
 Reading a human user's one-to-one DMs requires an already-issued user token
-with `im:read` and `im:history`; exact-ID author resolution additionally uses
-`users:read`. Route setup to the `slack-app-provisioning` Skill's dedicated
-`user-direct-message-read-only` variant. Keep it in a separate user profile and
-require explicit approval before adding each exact `D...` ID to the read
+with `im:read` and `im:history`; participant-workspace verification uses
+`users:read`, which also allows the fixed `users get` command to inspect any
+exact valid user ID. No user listing or search operation exists. Route setup
+to the `slack-app-provisioning` Skill's dedicated
+`user-direct-message-read-only` variant. Keep it in a separate user profile
+and require explicit approval before adding each exact `D...` ID to the read
 allowlist. Token login imports the credential into Keychain; it neither issues
 the token nor grants scopes. Group DMs remain unsupported by the canonical
 provisioning variants.

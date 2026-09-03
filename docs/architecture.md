@@ -100,9 +100,10 @@ invalidating old policies and write receipts.
 OAuth client and does not mint tokens or grant scopes. Human-to-human direct
 message reads therefore use a separate user-only Slack app and profile. Its
 canonical scopes are `im:read`, `im:history`, and `users:read`; the last scope
-serves only the fixed exact-ID `users.info` route. The app has no bot or write
-grant, and each `D...` target remains behind the identity- and
-generation-bound read policy.
+serves the fixed exact-ID `users.info` route used for participant-workspace
+verification and explicit `users get` lookups of any valid user ID. No user
+listing or search route exists. The app has no bot or write grant, and each
+`D...` target remains behind the identity- and generation-bound read policy.
 
 Slack's [documented one-to-one DM shape](https://docs.slack.dev/reference/methods/conversations.info/)
 may omit `is_shared` and `is_ext_shared`. The relaxed classifier applies only

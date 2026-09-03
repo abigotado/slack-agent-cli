@@ -145,6 +145,12 @@ func TestProvisioningSkillPinsCanonicalManifestsAndHooks(t *testing.T) {
 			t.Fatalf("user-only acceptance gate is missing %q", required)
 		}
 	}
+	manifestReference := string(files["references/manifests.md"])
+	for _, required := range []string{"verify the other DM", "any exact valid user ID", "no user listing or search"} {
+		if !strings.Contains(manifestReference, required) {
+			t.Fatalf("user-scope disclosure is missing %q", required)
+		}
+	}
 }
 
 func scratchDir(t *testing.T) string {

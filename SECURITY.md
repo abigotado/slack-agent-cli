@@ -24,11 +24,13 @@ rule for Codex and Claude Code.
 User tokens inherit the private-conversation visibility of the authorizing
 Slack member and therefore have a larger confidentiality impact than bot
 tokens. Direct-message access uses a separate user-only app and profile with
-only `im:read`, `im:history`, and exact-ID author lookup through `users:read`.
-There are no write, bot, group-DM, channel, search, or event grants. Runtime
-reads still require an exact conversation allowlist bound to that profile and
-credential generation. The unlocked-Keychain same-OS-user limitation above is
-especially important for this profile.
+only `im:read`, `im:history`, and `users:read`. The last scope verifies the
+other DM participant's workspace and permits `users get` to inspect any exact
+valid user ID; the CLI has no user listing or search operation. There are no
+write, bot, group-DM, channel, search, or event grants. Runtime reads still
+require an exact conversation allowlist bound to that profile and credential
+generation. The unlocked-Keychain same-OS-user limitation above is especially
+important for this profile.
 
 Because Slack may omit two Slack Connect booleans on ordinary direct-message
 objects, DM preflight also verifies the exact other participant with

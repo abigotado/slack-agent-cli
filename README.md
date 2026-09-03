@@ -115,8 +115,10 @@ A bot token cannot read a direct message between human users. Use a separate
 least-privilege user-only Slack app and a separate profile; do not add user
 scopes to the existing bot app. The embedded `slack-app-provisioning` Skill
 provides the canonical `user-direct-message-read-only` manifest with user
-scopes `im:read`, `im:history`, and `users:read`. The last scope is used only
-by the fixed exact-ID `users.info` operation to resolve message authors.
+scopes `im:read`, `im:history`, and `users:read`. The last scope verifies the
+other DM participant's workspace and also permits the fixed `users get`
+command to inspect any exact valid user ID. The CLI exposes no user listing or
+search operation.
 
 After the human-only Slack installation has issued a User OAuth Token, import
 it directly through the hidden terminal prompt. This command does not create a

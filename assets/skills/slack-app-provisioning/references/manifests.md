@@ -71,8 +71,10 @@ users:read
 Use with runtime capability `read` in a separate user-token profile. This
 variant reads one-to-one direct messages that the authorizing user belongs to.
 `im:read` discovers and inspects those conversations, `im:history` reads their
-history and replies, and `users:read` supports only the runtime's fixed
-exact-ID `users.info` operation for resolving message authors.
+history and replies, and `users:read` supports the runtime's fixed exact-ID
+`users.info` operation. The runtime uses that operation to verify the other DM
+participant's workspace, and `users get` can inspect any exact valid user ID;
+there is no user listing or search operation.
 
 This is a dedicated user-only app: bot scopes, `bot_user`, `chat:write`,
 `im:write`, all `mpim:*` scopes, channel and private-channel scopes, search,
