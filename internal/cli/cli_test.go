@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/abigotado/slack-agent-cli/internal/auth"
@@ -41,6 +43,7 @@ type fakeSlack struct {
 	identity     slack.Identity
 	conversation slack.Conversation
 	messages     slack.MessagePage
+	user         slack.User
 	calls        []string
 	postResult   slack.PostResult
 	postErr      error
@@ -66,9 +69,12 @@ func (s *fakeSlack) Replies(context.Context, slack.Token, slack.ThreadOptions) (
 	s.calls = append(s.calls, "conversations.replies")
 	return s.messages, nil
 }
-func (s *fakeSlack) UserInfo(context.Context, slack.Token, string) (slack.User, error) {
+func (s *fakeSlack) UserInfo(_ context.Context, _ slack.Token, id string) (slack.User, error) {
 	s.calls = append(s.calls, "users.info")
-	return slack.User{ID: "U1", TeamID: "T1"}, nil
+	if s.user.ID != "" || s.user.TeamID != "" {
+		return s.user, nil
+	}
+	return slack.User{ID: id, TeamID: "T1"}, nil
 }
 func (s *fakeSlack) PostMessage(_ context.Context, _ slack.Token, options slack.PostOptions) (slack.PostResult, error) {
 	s.calls = append(s.calls, "chat.postMessage")
@@ -341,6 +347,232 @@ func TestHistoryPreflightsPolicyAndMarksContentUntrusted(t *testing.T) {
 	meta := envelope["meta"].(map[string]any)
 	if meta["content_trust"] != "untrusted" {
 		t.Fatalf("missing trust marker: %v", meta)
+	}
+}
+
+func TestUserProfileReadsAllowlistedDirectMessage(t *testing.T) {
+	t.Parallel()
+	dependencies, store, api, stdout := newTestDependencies(t)
+	p := seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead})
+	no := false
+	api.conversation = slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsPrivate: true, IsOrgShared: &no}
+	api.messages = slack.MessagePage{Messages: []slack.Message{{Type: "message", User: "U2", Text: "untrusted direct message", TS: "1.0"}}}
+	if _, err := dependencies.Policies.Replace(context.Background(), p, policy.Read, []policy.Target{{ConversationID: "D1", Shared: slack.SharedStatus{}}}); err != nil {
+		t.Fatal(err)
+	}
+	exit := Run(context.Background(), []string{"messages", "history", "--profile", "work", "--conversation-id", "D1", "--limit", "25"}, dependencies)
+	if exit != errx.OK {
+		t.Fatalf("exit %d: %s", exit, stdout.String())
+	}
+	wantCalls := []string{"conversations.info", "users.info", "conversations.history"}
+	if fmt.Sprint(api.calls) != fmt.Sprint(wantCalls) {
+		t.Fatalf("calls %v", api.calls)
+	}
+	meta := decodeEnvelope(t, stdout)["meta"].(map[string]any)
+	if meta["content_trust"] != "untrusted" {
+		t.Fatalf("missing trust marker: %v", meta)
+	}
+}
+
+func TestDirectMessageClassificationValidatesShapeAndParticipant(t *testing.T) {
+	t.Parallel()
+	no := false
+	tests := []struct {
+		name         string
+		conversation slack.Conversation
+		user         slack.User
+		want         slack.SharedStatus
+		wantError    bool
+		wantUserCall bool
+	}{
+		{
+			name:         "same workspace",
+			conversation: slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsOrgShared: &no},
+			user:         slack.User{ID: "U2", TeamID: "T1"},
+			wantUserCall: true,
+		},
+		{
+			name:         "different workspace is conservatively external",
+			conversation: slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsOrgShared: &no},
+			user:         slack.User{ID: "U2", TeamID: "T2"},
+			want:         slack.SharedStatus{Shared: true, ExternallyShared: true},
+			wantUserCall: true,
+		},
+		{
+			name:         "malformed participant",
+			conversation: slack.Conversation{ID: "D1", User: "U!", IsIM: true, IsOrgShared: &no},
+			wantError:    true,
+		},
+		{
+			name:         "over-bound participant",
+			conversation: slack.Conversation{ID: "D1", User: strings.Repeat("U", 65), IsIM: true, IsOrgShared: &no},
+			wantError:    true,
+		},
+		{
+			name:         "mismatched returned participant",
+			conversation: slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsOrgShared: &no},
+			user:         slack.User{ID: "U3", TeamID: "T1"},
+			wantError:    true,
+			wantUserCall: true,
+		},
+		{
+			name:         "malformed returned participant",
+			conversation: slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsOrgShared: &no},
+			user:         slack.User{ID: "U!", TeamID: "T1"},
+			wantError:    true,
+			wantUserCall: true,
+		},
+		{
+			name:         "malformed returned team",
+			conversation: slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsOrgShared: &no},
+			user:         slack.User{ID: "U2", TeamID: "T!"},
+			wantError:    true,
+			wantUserCall: true,
+		},
+		{
+			name:         "missing returned team",
+			conversation: slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsOrgShared: &no},
+			user:         slack.User{ID: "U2"},
+			wantError:    true,
+			wantUserCall: true,
+		},
+		{
+			name:         "contradictory channel flag",
+			conversation: slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsChannel: true, IsOrgShared: &no},
+			wantError:    true,
+		},
+		{
+			name:         "contradictory mpim flag",
+			conversation: slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsMPIM: true, IsOrgShared: &no},
+			wantError:    true,
+		},
+		{
+			name:         "non-D IM",
+			conversation: slack.Conversation{ID: "C1", User: "U2", IsIM: true, IsOrgShared: &no},
+			wantError:    true,
+		},
+		{
+			name:         "missing org classification",
+			conversation: slack.Conversation{ID: "D1", User: "U2", IsIM: true},
+			wantError:    true,
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dependencies, store, api, _ := newTestDependencies(t)
+			p := seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead})
+			api.user = test.user
+			got, err := classifyTarget(context.Background(), dependencies, session{profile: p, token: "sentinel"}, test.conversation)
+			if (err != nil) != test.wantError {
+				t.Fatalf("result=%+v err=%v", got, err)
+			}
+			if err == nil && got != test.want {
+				t.Fatalf("result=%+v want=%+v", got, test.want)
+			}
+			userCalled := slices.Contains(api.calls, "users.info")
+			if userCalled != test.wantUserCall {
+				t.Fatalf("calls=%v", api.calls)
+			}
+		})
+	}
+}
+
+func TestNonDirectTargetsStillRequireCompleteSharedState(t *testing.T) {
+	t.Parallel()
+	no := false
+	tests := []struct {
+		name         string
+		conversation slack.Conversation
+		wantError    bool
+	}{
+		{name: "incomplete channel", conversation: slack.Conversation{ID: "C1", IsChannel: true, IsShared: &no, IsOrgShared: &no}, wantError: true},
+		{name: "incomplete mpim", conversation: slack.Conversation{ID: "G1", IsMPIM: true, IsPrivate: true, IsShared: &no, IsOrgShared: &no}, wantError: true},
+		{name: "complete mpim", conversation: slack.Conversation{ID: "G1", IsMPIM: true, IsPrivate: true, IsShared: &no, IsExtShared: &no, IsOrgShared: &no}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dependencies, store, api, _ := newTestDependencies(t)
+			p := seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead})
+			_, err := classifyTarget(context.Background(), dependencies, session{profile: p, token: "sentinel"}, test.conversation)
+			if (err != nil) != test.wantError {
+				t.Fatalf("target=%+v err=%v", test.conversation, err)
+			}
+			if slices.Contains(api.calls, "users.info") {
+				t.Fatalf("non-DM target caused user lookup: %+v", test.conversation)
+			}
+		})
+	}
+}
+
+func TestDirectMessageFromDifferentWorkspaceRequiresSlackConnectOptIn(t *testing.T) {
+	t.Parallel()
+	dependencies, store, api, stdout := newTestDependencies(t)
+	seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead})
+	no := false
+	api.conversation = slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsOrgShared: &no}
+	api.user = slack.User{ID: "U2", TeamID: "T2"}
+	args := []string{"auth", "allow-reads", "set", "--profile", "work", "--conversation-id", "D1", "--dry-run"}
+	if exit := Run(context.Background(), args, dependencies); exit != errx.PermissionDenied {
+		t.Fatalf("exit=%d output=%s", exit, stdout.String())
+	}
+	if code := decodeEnvelope(t, stdout)["error"].(map[string]any)["code"]; code != "SLACK_CONNECT_OPT_IN_REQUIRED" {
+		t.Fatalf("code=%v", code)
+	}
+
+	api.calls = nil
+	stdout.Reset()
+	args = append(args, "--allow-slack-connect")
+	if exit := Run(context.Background(), args, dependencies); exit != errx.OK {
+		t.Fatalf("opt-in exit=%d output=%s", exit, stdout.String())
+	}
+	if fmt.Sprint(api.calls) != fmt.Sprint([]string{"conversations.info", "users.info"}) {
+		t.Fatalf("calls=%v", api.calls)
+	}
+}
+
+func TestDirectMessageParticipantWorkspaceIsRevalidatedBeforeContent(t *testing.T) {
+	t.Parallel()
+	dependencies, store, api, stdout := newTestDependencies(t)
+	seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead})
+	no := false
+	api.conversation = slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsOrgShared: &no}
+	api.user = slack.User{ID: "U2", TeamID: "T1"}
+	if exit := Run(context.Background(), []string{"auth", "allow-reads", "set", "--profile", "work", "--conversation-id", "D1", "--yes"}, dependencies); exit != errx.OK {
+		t.Fatalf("policy exit %d: %s", exit, stdout.String())
+	}
+	if fmt.Sprint(api.calls) != fmt.Sprint([]string{"conversations.info", "users.info"}) {
+		t.Fatalf("policy calls=%v", api.calls)
+	}
+
+	api.user.TeamID = "T2"
+	for _, args := range [][]string{
+		{"messages", "history", "--profile", "work", "--conversation-id", "D1", "--limit", "25"},
+		{"messages", "thread", "--profile", "work", "--conversation-id", "D1", "--thread-ts", "1.0", "--limit", "25"},
+	} {
+		api.calls = nil
+		stdout.Reset()
+		if exit := Run(context.Background(), args, dependencies); exit != errx.Conflict {
+			t.Fatalf("args=%v exit=%d output=%s", args, exit, stdout.String())
+		}
+		if fmt.Sprint(api.calls) != fmt.Sprint([]string{"conversations.info", "users.info"}) {
+			t.Fatalf("args=%v calls=%v", args, api.calls)
+		}
+		if code := decodeEnvelope(t, stdout)["error"].(map[string]any)["code"]; code != "TARGET_SHARED_STATE_CHANGED" {
+			t.Fatalf("args=%v code=%v", args, code)
+		}
+	}
+
+	api.calls = nil
+	stdout.Reset()
+	dependencies.Input = bytes.NewBufferString("not sent")
+	if exit := Run(context.Background(), []string{"messages", "send", "--profile", "work", "--conversation-id", "D1", "--text-stdin", "--dry-run"}, dependencies); exit != errx.PermissionDenied {
+		t.Fatalf("send exit=%d output=%s", exit, stdout.String())
+	}
+	if len(api.calls) != 0 {
+		t.Fatalf("read-only user profile reached Slack for send: %v", api.calls)
 	}
 }
 

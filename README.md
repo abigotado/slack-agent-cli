@@ -109,6 +109,34 @@ slack-agent-cli auth status --profile bangr
 slack-agent-cli auth status --profile bangr --check
 ```
 
+### Read human-to-human direct messages
+
+A bot token cannot read a direct message between human users. Use a separate
+least-privilege user-only Slack app and a separate profile; do not add user
+scopes to the existing bot app. The embedded `slack-app-provisioning` Skill
+provides the canonical `user-direct-message-read-only` manifest with user
+scopes `im:read`, `im:history`, and `users:read`. The last scope is used only
+by the fixed exact-ID `users.info` operation to resolve message authors.
+
+After the human-only Slack installation has issued a User OAuth Token, import
+it directly through the hidden terminal prompt. This command does not create a
+token or grant scopes:
+
+```sh
+slack-agent-cli auth login \
+  --profile bangr-user \
+  --token-kind user \
+  --capability read \
+  --token-tty
+```
+
+Then explicitly approve each exact `D...` conversation in the read allowlist
+before reading it. The canonical user-only app has no bot, write, channel,
+group-DM, search, event, or redirect permissions. Slack CLI 4.7.0 does not
+document this user-only install path, so the provisioning Skill requires a
+one-shot human acceptance check and fails closed on admin approval or an
+uncertain result.
+
 ## Install Agent Skills
 
 The runtime Skill and the separate app-provisioning Skill install from the

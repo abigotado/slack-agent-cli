@@ -33,5 +33,21 @@ Use only `slack-agent-cli` for Slack operations covered by this skill.
 8. Never bypass an unsupported operation through Slack MCP, the official
    `slack api`, curl, an SDK, a browser, raw HTTP, or another Slack CLI.
 
+## Direct-message recovery
+
+A bot profile can read only direct messages in which that bot participates. It
+cannot read a `D...` conversation between human users. After an exact target
+returns not-found or permission-denied under a bot profile, do not retry other
+fixed methods or claim that `auth login --token-kind user` alone fixes access.
+
+Reading a human user's one-to-one DMs requires an already-issued user token
+with `im:read` and `im:history`; exact-ID author resolution additionally uses
+`users:read`. Route setup to the `slack-app-provisioning` Skill's dedicated
+`user-direct-message-read-only` variant. Keep it in a separate user profile and
+require explicit approval before adding each exact `D...` ID to the read
+allowlist. Token login imports the credential into Keychain; it neither issues
+the token nor grants scopes. Group DMs remain unsupported by the canonical
+provisioning variants.
+
 Read `reference/commands.md` for the fixed command surface and
 `reference/contract.md` before parsing results.

@@ -96,6 +96,24 @@ generic-password payload bound to that full non-secret identity. The atomic
 locked registry contains no token. Re-login changes the generation,
 invalidating old policies and write receipts.
 
+`auth login` imports and verifies an already-issued credential; it is not an
+OAuth client and does not mint tokens or grant scopes. Human-to-human direct
+message reads therefore use a separate user-only Slack app and profile. Its
+canonical scopes are `im:read`, `im:history`, and `users:read`; the last scope
+serves only the fixed exact-ID `users.info` route. The app has no bot or write
+grant, and each `D...` target remains behind the identity- and
+generation-bound read policy.
+
+Slack's [documented one-to-one DM shape](https://docs.slack.dev/reference/methods/conversations.info/)
+may omit `is_shared` and `is_ext_shared`. The relaxed classifier applies only
+to a valid, non-contradictory `D...`/`is_im` object with `is_org_shared`
+present. It validates the other participant through the fixed `users.info`
+route and requires a valid exact user ID and Team ID. A different Team ID is
+treated conservatively as externally shared. The lookup is repeated during
+every content preflight, so participant-workspace drift invalidates the stored
+shared-state policy before history or replies are read. Channels and group DMs
+retain the complete three-flag requirement.
+
 ## Target and content boundary
 
 Conversation content has two exact-ID policies: reads and writes. Both are
@@ -132,11 +150,21 @@ contract and must never fall back to Slack MCP, `slack api`, an SDK, browser
 automation, or raw HTTP for an unsupported operation.
 
 `assets/skills/slack-app-provisioning` is a separate operator-setup Skill. It
-pins an official Slack CLI version, scaffold, lockfile, and three exact
-least-privilege manifests. Agents may perform bounded local inspection and
-validation in a minimal clean environment with Slack CLI telemetry explicitly
-disabled. The clean environment derives its home from the operating-system
-account record, not caller environment state, and agent invocations use direct
-argv vectors. Slack login, app installation, and runtime token entry remain
-human-only terminal handoffs. This administrative surface is not available to
-the runtime Slack Skill.
+pins an official Slack CLI version, scaffold, lockfile, and four exact
+least-privilege manifests: three bot variants plus a dedicated read-only user
+DM variant. Agents may perform bounded local inspection and validation in a
+minimal clean environment with Slack CLI telemetry explicitly disabled. The
+clean environment derives its home from the operating-system account record,
+not caller environment state, and agent invocations use direct argv vectors.
+Slack login, app installation, and runtime token entry remain human-only
+terminal handoffs. Slack's
+[manifest schema](https://docs.slack.dev/reference/app-manifest/) supports user
+scopes without a bot, but Slack CLI 4.7.0 does not document that install path.
+Its pinned source passes only
+[bot scopes into `DeveloperAppInstall`](https://github.com/slackapi/slack-cli/blob/v4.7.0/internal/pkg/apps/install.go)
+and its
+[approval request](https://github.com/slackapi/slack-cli/blob/v4.7.0/internal/api/app.go)
+while the successful environment setup does not expose the returned user
+token. The user-only variant therefore requires a fail-closed live human
+acceptance gate before release. This administrative surface is not available
+to the runtime Slack Skill.

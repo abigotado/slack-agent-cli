@@ -301,9 +301,9 @@ func executePolicySet(ctx context.Context, dependencies Dependencies, name strin
 		if conversation.ID != id {
 			return errors.New("slack returned a different conversation identity")
 		}
-		shared, known := conversation.ClassifyShared()
-		if !known {
-			return errxPermission("TARGET_SHARED_STATE_UNKNOWN", "Slack did not provide complete shared-state fields")
+		shared, err := classifyTarget(ctx, dependencies, current, conversation)
+		if err != nil {
+			return err
 		}
 		if (shared.Shared || shared.ExternallyShared || shared.OrgShared) && !allowShared {
 			return errxPermission("SLACK_CONNECT_OPT_IN_REQUIRED", "shared conversations require --allow-slack-connect")

@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- Add a canonical dedicated user-only Slack app variant for allowlisted,
+  read-only access to one-to-one direct messages.
+- Correct both embedded Skills so `auth login --token-kind user` is described
+  as credential import, not token issuance or permission grant.
+- Accept Slack's documented sparse direct-message shape while revalidating the
+  exact other participant's workspace before every allowlisted content read.
+- Add a fail-closed human acceptance gate for Slack CLI 4.7.0's undocumented
+  user-only installation path.
+
 ## [0.2.2] - 2026-09-02
 
 - Fix successful `auth.test` decoding for Slack's documented string-valued

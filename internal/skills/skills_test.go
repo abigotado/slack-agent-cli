@@ -41,7 +41,7 @@ func TestDestinationUsesClosedSkillNamesForBothProviders(t *testing.T) {
 	}
 }
 
-func TestProvisioningSkillPinsCanonicalAllChannelsManifestAndHooks(t *testing.T) {
+func TestProvisioningSkillPinsCanonicalManifestsAndHooks(t *testing.T) {
 	t.Parallel()
 	files, err := canonicalFiles(SkillAppProvisioning)
 	if err != nil {
@@ -50,6 +50,7 @@ func TestProvisioningSkillPinsCanonicalAllChannelsManifestAndHooks(t *testing.T)
 	for _, path := range []string{
 		"SKILL.md",
 		"assets/manifests/all-channels-message-write.json",
+		"assets/manifests/user-direct-message-read-only.json",
 		"assets/scaffold/package-lock.json",
 		"references/commands.md",
 		"references/environment-cases.md",
@@ -71,6 +72,26 @@ func TestProvisioningSkillPinsCanonicalAllChannelsManifestAndHooks(t *testing.T)
 	want := []string{"channels:history", "channels:read", "chat:write", "groups:history", "groups:read", "users:read"}
 	if !slices.Equal(manifest.OAuthConfig.Scopes.Bot, want) {
 		t.Fatalf("scopes=%v want=%v", manifest.OAuthConfig.Scopes.Bot, want)
+	}
+	var userManifest struct {
+		Features    *json.RawMessage `json:"features"`
+		OAuthConfig struct {
+			RedirectURLs []string `json:"redirect_urls"`
+			Scopes       struct {
+				Bot  []string `json:"bot"`
+				User []string `json:"user"`
+			} `json:"scopes"`
+		} `json:"oauth_config"`
+	}
+	if err := json.Unmarshal(files["assets/manifests/user-direct-message-read-only.json"], &userManifest); err != nil {
+		t.Fatal(err)
+	}
+	userScopes := []string{"im:history", "im:read", "users:read"}
+	if !slices.Equal(userManifest.OAuthConfig.Scopes.User, userScopes) {
+		t.Fatalf("user scopes=%v want=%v", userManifest.OAuthConfig.Scopes.User, userScopes)
+	}
+	if userManifest.Features != nil || len(userManifest.OAuthConfig.Scopes.Bot) != 0 || len(userManifest.OAuthConfig.RedirectURLs) != 0 {
+		t.Fatalf("user-only manifest gained bot features, bot scopes, or redirect URLs: %+v", userManifest)
 	}
 	lockfile := string(files["assets/scaffold/package-lock.json"])
 	if !strings.Contains(lockfile, `"version": "2.0.0"`) || !strings.Contains(lockfile, "sha512-VLxGqJZwbrH3S+ovRhqlrcrKWHRDJtn3toraZKAcLaPqca5CgqTa/PmiCvCq3uUowiFw9B7FOB0y3ikQoDppTw==") {
@@ -111,6 +132,17 @@ func TestProvisioningSkillPinsCanonicalAllChannelsManifestAndHooks(t *testing.T)
 	for _, line := range strings.Split(commands, "\n") {
 		if strings.Contains(line, "--skip-update --no-color") && !strings.HasPrefix(line, "SANITIZED_PREFIX ") {
 			t.Fatalf("Slack CLI command lacks sanitized prefix: %q", line)
+		}
+	}
+	for _, required := range []string{"--token-kind user", "does not create one or grant OAuth scopes"} {
+		if !strings.Contains(commands, required) {
+			t.Fatalf("user-token handoff is missing %q", required)
+		}
+	}
+	stateMachine := string(files["references/state-machine.md"])
+	for _, required := range []string{"No Bot User OAuth Token", "admin-approval", "do not release"} {
+		if !strings.Contains(stateMachine, required) {
+			t.Fatalf("user-only acceptance gate is missing %q", required)
 		}
 	}
 }
