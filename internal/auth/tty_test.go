@@ -42,6 +42,36 @@ func TestReadTokenTTYRestoresEchoAndDoesNotEchoSecret(t *testing.T) {
 	}
 }
 
+func TestReadTokenTTYCountsOnlyTokenBytes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		valid bool
+	}{
+		{"maximum with LF", strings.Repeat("a", 8192) + "\n", true},
+		{"maximum with CRLF", strings.Repeat("a", 8192) + "\r\n", true},
+		{"oversized with LF", strings.Repeat("a", 8193) + "\n", false},
+		{"oversized with CRLF", strings.Repeat("a", 8193) + "\r\n", false},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			device := &fakeTTY{reader: strings.NewReader(test.input)}
+			token, err := readTokenTTY(device, func(int) (func() error, error) {
+				return func() error { return nil }, nil
+			}, nil)
+			if (err == nil) != test.valid {
+				t.Fatalf("token bytes=%d err=%v", len(token), err)
+			}
+			if test.valid && len(token) != 8192 {
+				t.Fatalf("token bytes=%d", len(token))
+			}
+		})
+	}
+}
+
 func TestReadTokenTTYRestoresEchoAfterInputFailure(t *testing.T) {
 	t.Parallel()
 	device := &fakeTTY{reader: errorReader{}}

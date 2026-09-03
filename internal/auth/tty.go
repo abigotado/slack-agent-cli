@@ -94,7 +94,7 @@ func readTokenTTY(device ttyDevice, disable echoDisabler, signals <-chan os.Sign
 	}
 	readResults := make(chan ttyReadResult, 1)
 	go func() {
-		reader := bufio.NewReader(io.LimitReader(device, contract.MaxTokenBytes+2))
+		reader := bufio.NewReader(io.LimitReader(device, contract.MaxTokenBytes+3))
 		payload, readErr := reader.ReadBytes('\n')
 		_, newlineErr := io.WriteString(device, "\n")
 		readResults <- ttyReadResult{payload: payload, readErr: readErr, newlineErr: newlineErr}
@@ -122,9 +122,6 @@ func readTokenTTY(device ttyDevice, disable echoDisabler, signals <-chan os.Sign
 	}
 	if readResult.newlineErr != nil {
 		return "", fmt.Errorf("%w: write terminal newline: %v", ErrTTYIO, readResult.newlineErr)
-	}
-	if len(readResult.payload) > contract.MaxTokenBytes+1 {
-		return "", errors.New("token input is empty or exceeds 8 KiB")
 	}
 	return validateTokenPayload(readResult.payload)
 }

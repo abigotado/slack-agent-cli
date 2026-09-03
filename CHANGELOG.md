@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.2.2] - 2026-09-02
+
+- Fix successful `auth.test` decoding for Slack's documented string-valued
+  `user` field so valid bot and user tokens can be saved as named profiles.
+- Add fixed, non-sensitive failure stages to the v1 error envelope while
+  preserving existing error codes and recovery-oriented exit codes.
+- Enforce the same bounded printable-ASCII token input contract for hidden TTY
+  and stdin login paths.
+
 ## [0.2.1] - 2026-09-02
 
 - Republish the v0.2 feature set with the complete immutable source release
@@ -29,3 +38,4 @@ All notable changes to this project are documented in this file.
 [0.1.0]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.1.0
 [0.2.0]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.0
 [0.2.1]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.1
+[0.2.2]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.2

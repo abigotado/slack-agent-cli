@@ -190,6 +190,40 @@ func TestAuthLoginTTYUsesHiddenInputAndNeverOutputsToken(t *testing.T) {
 	}
 }
 
+func TestAuthLoginRejectsInvalidTokenPayloadBeforeNetwork(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		selector  string
+		configure func(*Dependencies)
+	}{
+		{"stdin", "--token-stdin", func(dependencies *Dependencies) {
+			dependencies.Input = bytes.NewBufferString("xoxb-\x7f\n")
+		}},
+		{"TTY", "--token-tty", func(dependencies *Dependencies) {
+			dependencies.TokenTTY = func() (string, error) { return "xoxb-\u200b", nil }
+		}},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dependencies, _, api, stdout := newTestDependencies(t)
+			test.configure(&dependencies)
+			args := []string{"auth", "login", "--profile", "bangr", "--token-kind", "bot", "--capability", "read", test.selector}
+			if exit := Run(context.Background(), args, dependencies); exit != errx.Usage {
+				t.Fatalf("exit=%d output=%q", exit, stdout.String())
+			}
+			if len(api.calls) != 0 {
+				t.Fatalf("network called: %v", api.calls)
+			}
+			if code := decodeEnvelope(t, stdout)["error"].(map[string]any)["code"]; code != "INVALID_TOKEN_INPUT" {
+				t.Fatalf("code=%v", code)
+			}
+		})
+	}
+}
+
 func TestAuthLoginRejectsAmbiguousOrUnavailableTokenInputBeforeNetwork(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {

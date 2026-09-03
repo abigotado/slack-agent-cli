@@ -61,7 +61,7 @@ prebuilt executable or invoke `/usr/bin/security`.
 Go 1.25.14 or newer:
 
 ```sh
-go install github.com/abigotado/slack-agent-cli/cmd/slack-agent-cli@v0.2.1
+go install github.com/abigotado/slack-agent-cli/cmd/slack-agent-cli@v0.2.2
 slack-agent-cli version
 ```
 

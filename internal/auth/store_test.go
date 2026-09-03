@@ -17,7 +17,26 @@ func TestReadToken(t *testing.T) {
 	tests := []struct {
 		name, input string
 		valid       bool
-	}{{"valid", "xoxb-token\n", true}, {"empty", "", false}, {"two lines", "one\ntwo\n", false}, {"space", "xoxb bad\n", false}, {"oversized", strings.Repeat("a", 8193), false}}
+	}{
+		{"valid", "xoxb-token\n", true},
+		{"valid CRLF", "xoxb-token\r\n", true},
+		{"lower ASCII boundary", "!\n", true},
+		{"upper ASCII boundary", "~\n", true},
+		{"empty", "", false},
+		{"line terminator only", "\n", false},
+		{"embedded LF", "one\ntwo\n", false},
+		{"embedded CR", "one\rtwo\n", false},
+		{"embedded NUL", "one\x00two\n", false},
+		{"space", "xoxb bad\n", false},
+		{"DEL", "xoxb-\x7f\n", false},
+		{"non-ASCII", "xoxb-é\n", false},
+		{"maximum without terminator", strings.Repeat("a", 8192), true},
+		{"maximum with LF", strings.Repeat("a", 8192) + "\n", true},
+		{"maximum with CRLF", strings.Repeat("a", 8192) + "\r\n", true},
+		{"oversized without terminator", strings.Repeat("a", 8193), false},
+		{"oversized with LF", strings.Repeat("a", 8193) + "\n", false},
+		{"oversized with CRLF", strings.Repeat("a", 8193) + "\r\n", false},
+	}
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {

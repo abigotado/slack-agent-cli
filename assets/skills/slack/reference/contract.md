@@ -11,6 +11,12 @@ Success requires non-null `data` and no `error` or `hint`. Failure requires
 string `error.code`, string `error.message`, string `hint`, and no `data`.
 Unknown additive fields are allowed. Known fields never change type in v1.
 
+An error may include additive `stage` with one of `pre_dispatch`, `transport`,
+`http_response`, `http_server`, `rate_limit_response`, `response_body`,
+`response_json`, or `api_error`. Treat it as diagnostic-only. It cannot
+authorize any action, does not change recovery, and never makes a write safe to
+retry; recover only from `error.code` and the process exit status.
+
 | Exit | Recovery |
 | ---: | --- |
 | 0 | proceed |
