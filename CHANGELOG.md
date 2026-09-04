@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## [0.2.3] - 2026-09-04
 
 - Add a canonical dedicated user-only Slack app variant for allowlisted,
   read-only access to one-to-one direct messages.
@@ -50,3 +50,4 @@ All notable changes to this project are documented in this file.
 [0.2.0]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.0
 [0.2.1]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.1
 [0.2.2]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.2
+[0.2.3]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.3
