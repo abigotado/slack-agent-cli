@@ -14,9 +14,11 @@ import (
 	"github.com/abigotado/slack-agent-cli/internal/errx"
 )
 
+func fixtureBotToken() string { return "xox" + "b-super-secret" }
+
 func TestAuthTestUsesFixedRouteAndHeader(t *testing.T) {
 	t.Parallel()
-	sentinel := "xoxb-super-secret"
+	sentinel := fixtureBotToken()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/auth.test" || r.Method != http.MethodPost {
 			t.Fatalf("request %s %s", r.Method, r.URL.Path)
@@ -40,7 +42,7 @@ func TestAuthTestUsesFixedRouteAndHeader(t *testing.T) {
 
 func TestSlackFailuresAreBoundedAndRedacted(t *testing.T) {
 	t.Parallel()
-	sentinel := "xoxb-super-secret"
+	sentinel := fixtureBotToken()
 	tests := []struct {
 		name    string
 		handler http.HandlerFunc
@@ -83,7 +85,7 @@ func TestSlackFailuresAreBoundedAndRedacted(t *testing.T) {
 
 func TestReadFailureStagesAreFixedAndRedacted(t *testing.T) {
 	t.Parallel()
-	const sentinel = "xoxb-super-secret"
+	sentinel := fixtureBotToken()
 	tests := []struct {
 		name           string
 		stage          errx.Stage

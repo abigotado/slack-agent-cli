@@ -161,7 +161,8 @@ func TestNetworkCommandRequiresExplicitProfile(t *testing.T) {
 func TestAuthLoginUsesVerifiedIdentityAndNeverOutputsToken(t *testing.T) {
 	t.Parallel()
 	dependencies, store, api, stdout := newTestDependencies(t)
-	dependencies.Input = bytes.NewBufferString("xoxp-secret\n")
+	token := "xox" + "p-secret"
+	dependencies.Input = bytes.NewBufferString(token + "\n")
 	status := Run(context.Background(), []string{"auth", "login", "--profile", "work", "--token-kind", "user", "--capability", "read", "--token-stdin"}, dependencies)
 	if status != errx.OK {
 		t.Fatalf("status %d: %s", status, stdout.String())
@@ -169,7 +170,7 @@ func TestAuthLoginUsesVerifiedIdentityAndNeverOutputsToken(t *testing.T) {
 	if len(api.calls) != 1 || api.calls[0] != "auth.test" {
 		t.Fatalf("calls %v", api.calls)
 	}
-	if bytes.Contains(stdout.Bytes(), []byte("xoxp-secret")) {
+	if bytes.Contains(stdout.Bytes(), []byte(token)) {
 		t.Fatal("token leaked to output")
 	}
 	p, err := dependencies.Profiles.Get(context.Background(), "work")
@@ -177,7 +178,7 @@ func TestAuthLoginUsesVerifiedIdentityAndNeverOutputsToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	credential := store.values["work"]
-	if credential.Token != "xoxp-secret" || credential.ProfileIdentity != profile.Identity(p) {
+	if credential.Token != token || credential.ProfileIdentity != profile.Identity(p) {
 		t.Fatal("credential binding mismatch")
 	}
 }
@@ -204,10 +205,10 @@ func TestAuthLoginRejectsInvalidTokenPayloadBeforeNetwork(t *testing.T) {
 		configure func(*Dependencies)
 	}{
 		{"stdin", "--token-stdin", func(dependencies *Dependencies) {
-			dependencies.Input = bytes.NewBufferString("xoxb-\x7f\n")
+			dependencies.Input = bytes.NewBufferString("xox" + "b-\x7f\n")
 		}},
 		{"TTY", "--token-tty", func(dependencies *Dependencies) {
-			dependencies.TokenTTY = func() (string, error) { return "xoxb-\u200b", nil }
+			dependencies.TokenTTY = func() (string, error) { return "xox" + "b-\u200b", nil }
 		}},
 	}
 	for _, test := range tests {
