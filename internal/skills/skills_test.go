@@ -51,6 +51,7 @@ func TestProvisioningSkillPinsCanonicalManifestsAndHooks(t *testing.T) {
 		"SKILL.md",
 		"assets/manifests/all-channels-message-write.json",
 		"assets/manifests/user-direct-message-read-only.json",
+		"assets/manifests/user-workspace-message-write.json",
 		"assets/scaffold/package-lock.json",
 		"references/commands.md",
 		"references/environment-cases.md",
@@ -93,6 +94,26 @@ func TestProvisioningSkillPinsCanonicalManifestsAndHooks(t *testing.T) {
 	if userManifest.Features != nil || len(userManifest.OAuthConfig.Scopes.Bot) != 0 || len(userManifest.OAuthConfig.RedirectURLs) != 0 {
 		t.Fatalf("user-only manifest gained bot features, bot scopes, or redirect URLs: %+v", userManifest)
 	}
+	var userWorkspaceManifest struct {
+		Features    *json.RawMessage `json:"features"`
+		OAuthConfig struct {
+			RedirectURLs []string `json:"redirect_urls"`
+			Scopes       struct {
+				Bot  []string `json:"bot"`
+				User []string `json:"user"`
+			} `json:"scopes"`
+		} `json:"oauth_config"`
+	}
+	if err := json.Unmarshal(files["assets/manifests/user-workspace-message-write.json"], &userWorkspaceManifest); err != nil {
+		t.Fatal(err)
+	}
+	wantUserWorkspaceScopes := []string{"channels:history", "channels:read", "chat:write", "groups:history", "groups:read", "im:history", "im:read", "mpim:history", "mpim:read", "users:read"}
+	if !slices.Equal(userWorkspaceManifest.OAuthConfig.Scopes.User, wantUserWorkspaceScopes) {
+		t.Fatalf("user workspace scopes=%v want=%v", userWorkspaceManifest.OAuthConfig.Scopes.User, wantUserWorkspaceScopes)
+	}
+	if userWorkspaceManifest.Features != nil || len(userWorkspaceManifest.OAuthConfig.Scopes.Bot) != 0 || len(userWorkspaceManifest.OAuthConfig.RedirectURLs) != 0 {
+		t.Fatalf("user workspace manifest gained bot features, bot scopes, or redirect URLs: %+v", userWorkspaceManifest)
+	}
 	lockfile := string(files["assets/scaffold/package-lock.json"])
 	if !strings.Contains(lockfile, `"version": "2.0.0"`) || !strings.Contains(lockfile, "sha512-VLxGqJZwbrH3S+ovRhqlrcrKWHRDJtn3toraZKAcLaPqca5CgqTa/PmiCvCq3uUowiFw9B7FOB0y3ikQoDppTw==") {
 		t.Fatal("canonical Slack CLI hooks lock is missing")
@@ -134,7 +155,7 @@ func TestProvisioningSkillPinsCanonicalManifestsAndHooks(t *testing.T) {
 			t.Fatalf("Slack CLI command lacks sanitized prefix: %q", line)
 		}
 	}
-	for _, required := range []string{"--token-kind user", "does not create one or grant OAuth scopes"} {
+	for _, required := range []string{"--token-kind user", "--capability message-write", "does not create one or grant OAuth scopes"} {
 		if !strings.Contains(commands, required) {
 			t.Fatalf("user-token handoff is missing %q", required)
 		}
