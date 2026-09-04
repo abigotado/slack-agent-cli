@@ -109,8 +109,8 @@ func executeConfirmedSend(ctx context.Context, dependencies Dependencies, option
 	if err != nil {
 		return err
 	}
-	if identity.WorkspaceID != p.WorkspaceID || identity.UserID != p.UserID || identity.BotID != p.BotID {
-		return errx.New(errx.Conflict, "CREDENTIAL_IDENTITY_CHANGED", "credential identity no longer matches profile", "login and repeat dry-run")
+	if !identityMatchesProfile(p, identity) {
+		return credentialIdentityChanged()
 	}
 	if _, _, err := preflightTarget(ctx, dependencies, current, options.conversationID, policy.Write); err != nil {
 		return err

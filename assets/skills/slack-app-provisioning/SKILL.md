@@ -28,15 +28,17 @@ interactive lifecycle mutation from an agent-captured session.
 6. Do not use `slack api`, Slack MCP, an SDK, raw HTTP, browser automation,
    `run`, `deploy`, environment commands, token flags, or a fallback tool.
 7. The agent may validate and inspect. The operator alone runs the displayed
-   `slack app install` command after approving the exact Team ID, capabilities,
-   manifest SHA-256, and command.
+   `slack app install` command after approving the exact Team ID, token kind,
+   capabilities, manifest SHA-256, and command.
+8. Provision user-token access in a separate user-only app. Never add user
+   scopes to an existing bot app or couple its bot and user credentials.
 
 ## Workflow
 
 1. Read [references/commands.md](references/commands.md) before invoking the
    official CLI.
 2. Read [references/manifests.md](references/manifests.md), choose exactly one
-   canonical capability variant, and show its exact scope set.
+   canonical capability variant, and show its exact token kind and scope set.
 3. Copy the canonical scaffold to an explicit empty local directory. Copy the
    selected manifest as `manifest.json`; do not merge arbitrary fields.
 4. Verify all canonical file digests. Ask before the one supply-chain step,
@@ -48,7 +50,11 @@ interactive lifecycle mutation from an agent-captured session.
 6. Show the Team ID, selected capability set, manifest digest, and exact
    human-only install command. Stop so the operator can run it directly.
 7. Apply [references/state-machine.md](references/state-machine.md) to reported
-   results. Never retry a mutation after uncertain or failed output.
-8. After Slack exposes a bot token, tell the operator to import it in their own
-   terminal with `slack-agent-cli auth login --token-tty`; never run that
-   command or handle the token on their behalf.
+   results. The user-only variant has an additional human acceptance gate
+   because Slack CLI 4.7.0 does not document that install path. Never retry a
+   mutation after uncertain, approval-required, or failed output.
+8. After Slack exposes the selected token kind, tell the operator to import it
+   in their own terminal with the exact `slack-agent-cli auth login
+   --token-tty` handoff from [references/commands.md](references/commands.md).
+   Login imports an already-issued token; it does not create a token or grant
+   scopes. Never run it or handle the token on the operator's behalf.

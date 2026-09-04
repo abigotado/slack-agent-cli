@@ -183,6 +183,8 @@ func translate(err error) error {
 		return errx.New(errx.PermissionDenied, "TARGET_NOT_ALLOWLISTED", "conversation is not allowlisted for this operation", "request an explicit policy change; do not broaden automatically")
 	case errors.Is(err, policy.ErrBindingMismatch):
 		return errx.New(errx.Conflict, "POLICY_BINDING_STALE", "policy does not match the current profile generation", "rebuild the exact policy after reviewing the profile")
+	case errors.Is(err, policy.ErrRebindNotNeeded):
+		return errx.New(errx.Conflict, "STALE_POLICY_REBIND_NOT_REQUIRED", "policy binding is already current", "inspect the current policy; do not retry the reset unchanged")
 	case errors.Is(err, policy.ErrSharedMismatch):
 		return errx.New(errx.Conflict, "TARGET_SHARED_STATE_CHANGED", "conversation shared state differs from policy", "review the target and rebuild policy explicitly")
 	case errors.Is(err, policy.ErrWriteNeedsRead):

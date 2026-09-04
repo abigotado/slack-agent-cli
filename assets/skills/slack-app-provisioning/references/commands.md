@@ -99,11 +99,17 @@ SANITIZED_PREFIX login --skip-update --no-color
 SANITIZED_PREFIX app install --team TEAM_ID --environment local --skip-update --no-color
 slack-agent-cli auth login --profile PROFILE --token-kind bot \
   --capability read [--capability message-write] --token-tty
+slack-agent-cli auth login --profile PROFILE --token-kind user \
+  --capability read [--capability message-write] --token-tty
 ```
 
 The operator executes the `/slackauthticket` in the intended workspace and
-enters challenge/token values directly in their terminal. The agent never asks
-for those values.
+enters challenge/token values directly in their terminal. For the user-only
+variant, the operator confirms in Slack's OAuth & Permissions page that Slack
+issued a User OAuth Token and no Bot User OAuth Token, then enters the user
+token only into the hidden controlling-terminal prompt. `auth login` imports
+that token; it does not create one or grant OAuth scopes. The agent never asks
+for, captures, or verifies the token value.
 
 ## Forbidden surface
 

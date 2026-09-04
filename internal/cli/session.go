@@ -52,14 +52,77 @@ func preflightTarget(ctx context.Context, dependencies Dependencies, current ses
 	if conversation.ID != conversationID {
 		return slack.Conversation{}, slack.SharedStatus{}, errors.New("slack returned a different conversation identity")
 	}
-	shared, known := conversation.ClassifyShared()
-	if !known {
-		return slack.Conversation{}, slack.SharedStatus{}, errxPermission("TARGET_SHARED_STATE_UNKNOWN", "Slack did not provide complete shared-state fields")
+	shared, err := classifyTarget(ctx, dependencies, current, conversation)
+	if err != nil {
+		return slack.Conversation{}, slack.SharedStatus{}, err
 	}
 	if err := dependencies.Policies.Require(ctx, current.profile, kind, conversationID, shared); err != nil {
 		return slack.Conversation{}, slack.SharedStatus{}, err
 	}
 	return conversation, shared, nil
+}
+
+func classifyTarget(ctx context.Context, dependencies Dependencies, current session, conversation slack.Conversation) (slack.SharedStatus, error) {
+	if err := profile.ValidateSlackID(conversation.ID); err != nil {
+		return slack.SharedStatus{}, targetSharedStateUnknown()
+	}
+	directID := strings.HasPrefix(conversation.ID, "D")
+	if directID || conversation.IsIM {
+		if !directID || !conversation.IsIM || conversation.IsChannel || conversation.IsMPIM {
+			return slack.SharedStatus{}, targetSharedStateUnknown()
+		}
+		if err := profile.ValidateSlackID(conversation.User); err != nil {
+			return slack.SharedStatus{}, targetSharedStateUnknown()
+		}
+		participant, err := dependencies.Users.UserInfo(ctx, current.token, conversation.User)
+		if err != nil {
+			return slack.SharedStatus{}, err
+		}
+		if profile.ValidateSlackID(participant.ID) != nil || profile.ValidateSlackID(participant.TeamID) != nil || participant.ID != conversation.User {
+			return slack.SharedStatus{}, targetSharedStateUnknown()
+		}
+		shared := flagTrue(conversation.IsShared)
+		external := flagTrue(conversation.IsExtShared)
+		org := flagTrue(conversation.IsOrgShared)
+		if participant.TeamID != current.profile.WorkspaceID || participant.IsStranger {
+			external = true
+		}
+		if conversation.IsOrgShared == nil && !shared && !external {
+			if current.profile.TokenKind != profile.TokenUser || current.profile.EnterpriseID != "" {
+				return slack.SharedStatus{}, targetSharedStateUnknown()
+			}
+			identity, err := dependencies.Auth.AuthTest(ctx, current.token)
+			if err != nil {
+				return slack.SharedStatus{}, err
+			}
+			if !identityMatchesProfile(current.profile, identity) {
+				return slack.SharedStatus{}, credentialIdentityChanged()
+			}
+			if identity.EnterpriseID != "" {
+				return slack.SharedStatus{}, targetSharedStateUnknown()
+			}
+		}
+		return slack.SharedStatus{Shared: shared || external || org, ExternallyShared: external, OrgShared: org}, nil
+	}
+	shared, known := conversation.ClassifyShared()
+	if !known {
+		return slack.SharedStatus{}, targetSharedStateUnknown()
+	}
+	return shared, nil
+}
+
+func flagTrue(value *bool) bool { return value != nil && *value }
+
+func identityMatchesProfile(value profile.Profile, identity slack.Identity) bool {
+	return identity.WorkspaceID == value.WorkspaceID && identity.UserID == value.UserID && identity.BotID == value.BotID && identity.EnterpriseID == value.EnterpriseID
+}
+
+func credentialIdentityChanged() error {
+	return errx.New(errx.Conflict, "CREDENTIAL_IDENTITY_CHANGED", "credential identity no longer matches profile", "login the exact profile again")
+}
+
+func targetSharedStateUnknown() error {
+	return errxPermission("TARGET_SHARED_STATE_UNKNOWN", "Slack did not provide a trustworthy target classification")
 }
 
 func validateLimit(limit int) error {

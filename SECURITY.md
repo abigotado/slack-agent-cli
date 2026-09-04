@@ -21,6 +21,28 @@ fields, marks content-bearing output with `content_trust: "untrusted"`, and
 never follows links or executes content. The embedded Skill carries the same
 rule for Codex and Claude Code.
 
+User tokens inherit the private-conversation visibility of the authorizing
+Slack member and therefore have a larger confidentiality impact than bot
+tokens. Direct-message access uses a separate user-only app and profile with
+only `im:read`, `im:history`, and `users:read`. The last scope verifies the
+other DM participant's workspace and permits `users get` to inspect any exact
+valid user ID; the CLI has no user listing or search operation. There are no
+write, bot, group-DM, channel, search, or event grants. Runtime reads still
+require an exact conversation allowlist bound to that profile and credential
+generation. The unlocked-Keychain same-OS-user limitation above is especially
+important for this profile.
+
+Because Slack may omit shared-state booleans on ordinary direct-message
+objects, DM preflight also verifies the exact other participant with
+`users.info`. Missing or malformed identity fields fail closed; a foreign Team
+ID, `is_stranger` participant, or any known shared flag is treated as shared.
+Only a standalone user-token profile with an exact same-workspace participant
+may classify absent shared state as local, after a fresh `auth.test` confirms
+the complete profile identity and an empty current Enterprise ID. Enterprise
+profiles remain denied when organization state is absent. The check runs both
+when policy is created and before every content read so a changed participant
+classification cannot reuse stale authorization.
+
 Message writes are restricted to exact identity-bound conversation IDs. They
 require a local dry-run receipt plus exact confirmation, are dispatched once,
 and return exit 9 when the outcome cannot be proven. Never automatically retry
