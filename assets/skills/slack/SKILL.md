@@ -9,8 +9,9 @@ Use only `slack-agent-cli` for Slack operations covered by this skill.
 
 ## Safety contract
 
-1. Ask the user to choose an exact named profile for every Slack network
-   command. Never infer a default, active, environment, or only profile.
+1. Use an exact named profile explicitly selected in the current task for every
+   Slack network command. Never infer a default, active, environment, or only
+   profile, and never bake an operator-specific profile name into this Skill.
 2. Capture stdout and stderr separately. Reject stdout over 8 MiB, stderr over
    4 KiB, invalid JSON, an envelope version other than integer `1`, or a branch
    that contains both/neither `data` and `error`.
@@ -40,16 +41,17 @@ cannot read a `D...` conversation between human users. After an exact target
 returns not-found or permission-denied under a bot profile, do not retry other
 fixed methods or claim that `auth login --token-kind user` alone fixes access.
 
-Reading a human user's one-to-one DMs requires an already-issued user token
-with `im:read` and `im:history`; participant-workspace verification uses
-`users:read`, which also allows the fixed `users get` command to inspect any
-exact valid user ID. No user listing or search operation exists. Route setup
-to the `slack-app-provisioning` Skill's dedicated
-`user-direct-message-read-only` variant. Keep it in a separate user profile
-and require explicit approval before adding each exact `D...` ID to the read
-allowlist. Token login imports the credential into Keychain; it neither issues
-the token nor grants scopes. Group DMs remain unsupported by the canonical
-provisioning variants.
+Reading a human user's conversations requires an already-issued user token.
+For one-to-one DMs, participant-workspace verification uses `users:read`,
+which also allows the fixed `users get` command to inspect any exact valid user
+ID. No user listing or search operation exists. Route setup to the
+`slack-app-provisioning` Skill's `user-workspace-message-write` variant when
+the operator needs their exact allowlisted public/private channels, DMs, group
+DMs, and confirmed sends; use `user-direct-message-read-only` only for the
+narrow DM-only case. Each target still requires explicit approval before it is
+added to policy. Token login imports the credential into Keychain; it neither
+issues the token nor grants scopes. Group DM use is conditional on its live
+acceptance gate and never bypasses missing shared-state fields.
 
 Read `reference/commands.md` for the fixed command surface and
 `reference/contract.md` before parsing results.

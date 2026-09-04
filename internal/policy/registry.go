@@ -22,6 +22,7 @@ var (
 	ErrBindingMismatch = errors.New("policy binding does not match profile")
 	ErrSharedMismatch  = errors.New("conversation shared state changed")
 	ErrWriteNeedsRead  = errors.New("write targets must be a subset of read targets")
+	ErrRebindNotNeeded = errors.New("policy binding is already current")
 )
 
 // CommitError reports a durability failure after the new policy file became
@@ -185,6 +186,77 @@ func (r *Registry) PreviewReplace(ctx context.Context, p profile.Profile, kind K
 	return set, nil
 }
 
+// PreviewRebindRead resets a stale profile binding locally before replacing its
+// complete read target set. The resulting set deliberately drops every write
+// target: writes must be re-authorized against the new identity and generation.
+func (r *Registry) PreviewRebindRead(ctx context.Context, p profile.Profile, targets []Target) (Set, error) {
+	if err := validateReplacement(Read, targets); err != nil {
+		return Set{}, err
+	}
+	file, err := r.load()
+	if err != nil {
+		return Set{}, err
+	}
+	for _, set := range file.Sets {
+		if set.ProfileName != p.Name {
+			continue
+		}
+		if err := validateBinding(set, p); err == nil {
+			return Set{}, ErrRebindNotNeeded
+		} else if !errors.Is(err, ErrBindingMismatch) {
+			return Set{}, err
+		}
+		fresh := newSet(p)
+		fresh.Reads = cloneTargets(targets)
+		return fresh, nil
+	}
+	return Set{}, ErrRebindNotNeeded
+}
+
+// RebindRead atomically replaces a stale profile policy with an exact fresh
+// read set. It is intentionally read-only in effect: all old writes are
+// discarded, preserving write subset read and requiring fresh authorization.
+func (r *Registry) RebindRead(ctx context.Context, p profile.Profile, targets []Target) (Set, error) {
+	if err := validateReplacement(Read, targets); err != nil {
+		return Set{}, err
+	}
+	if err := r.ensureDirectory(); err != nil {
+		return Set{}, err
+	}
+	var result Set
+	committed := false
+	err := lockfile.With(ctx, r.path+".lock", func() error {
+		file, err := r.load()
+		if err != nil {
+			return err
+		}
+		for index := range file.Sets {
+			if file.Sets[index].ProfileName != p.Name {
+				continue
+			}
+			if err := validateBinding(file.Sets[index], p); err == nil {
+				return ErrRebindNotNeeded
+			} else if !errors.Is(err, ErrBindingMismatch) {
+				return err
+			}
+			fresh := newSet(p)
+			fresh.Reads = cloneTargets(targets)
+			file.Sets[index] = fresh
+			if err := r.save(file); err != nil {
+				return err
+			}
+			committed = true
+			result = fresh
+			return nil
+		}
+		return ErrRebindNotNeeded
+	})
+	if err != nil && committed && !WasCommitted(err) {
+		err = &CommitError{cause: err}
+	}
+	return result, err
+}
+
 // Require enforces exact target, binding, and current shared state.
 func (r *Registry) Require(ctx context.Context, p profile.Profile, kind Kind, conversationID string, current slack.SharedStatus) error {
 	target, err := r.Target(ctx, p, kind, conversationID)
@@ -236,6 +308,16 @@ func validateTargets(targets []Target) error {
 		seen[target.ConversationID] = true
 	}
 	return nil
+}
+
+func validateReplacement(kind Kind, targets []Target) error {
+	if kind != Read {
+		return errors.New("stale policy rebind supports read targets only")
+	}
+	if len(targets) > contract.MaxPolicyTargets {
+		return errors.New("policy target count exceeds v1 bound")
+	}
+	return validateTargets(targets)
 }
 func cloneTargets(targets []Target) []Target {
 	result := append([]Target(nil), targets...)

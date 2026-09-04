@@ -374,16 +374,62 @@ func TestUserProfileReadsAllowlistedDirectMessage(t *testing.T) {
 	}
 }
 
+func TestUsersGetOmitsInternalStrangerClassification(t *testing.T) {
+	t.Parallel()
+	dependencies, store, api, stdout := newTestDependencies(t)
+	seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead})
+	api.user = slack.User{ID: "U2", TeamID: "T1", IsStranger: true}
+	if exit := Run(context.Background(), []string{"users", "get", "U2", "--profile", "work"}, dependencies); exit != errx.OK {
+		t.Fatalf("exit=%d output=%s", exit, stdout.String())
+	}
+	data := decodeEnvelope(t, stdout)["data"].(map[string]any)
+	if _, found := data["is_stranger"]; found {
+		t.Fatalf("internal stranger classification leaked: %v", data)
+	}
+}
+
+func TestCredentialChecksRejectEnterpriseIdentityDrift(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "auth status", args: []string{"auth", "status", "--profile", "work", "--check"}},
+		{name: "me", args: []string{"me", "--profile", "work"}},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dependencies, store, api, stdout := newTestDependencies(t)
+			seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead})
+			api.identity.EnterpriseID = "E1"
+			if exit := Run(context.Background(), test.args, dependencies); exit != errx.Conflict {
+				t.Fatalf("exit=%d output=%s", exit, stdout.String())
+			}
+			if code := decodeEnvelope(t, stdout)["error"].(map[string]any)["code"]; code != "CREDENTIAL_IDENTITY_CHANGED" {
+				t.Fatalf("code=%v", code)
+			}
+			if fmt.Sprint(api.calls) != fmt.Sprint([]string{"auth.test"}) {
+				t.Fatalf("calls=%v", api.calls)
+			}
+		})
+	}
+}
+
 func TestDirectMessageClassificationValidatesShapeAndParticipant(t *testing.T) {
 	t.Parallel()
-	no := false
+	no, yes := false, true
 	tests := []struct {
-		name         string
-		conversation slack.Conversation
-		user         slack.User
-		want         slack.SharedStatus
-		wantError    bool
-		wantUserCall bool
+		name                 string
+		conversation         slack.Conversation
+		user                 slack.User
+		enterpriseID         string
+		identityEnterpriseID string
+		want                 slack.SharedStatus
+		wantCode             string
+		wantError            bool
+		wantUserCall         bool
 	}{
 		{
 			name:         "same workspace",
@@ -452,9 +498,34 @@ func TestDirectMessageClassificationValidatesShapeAndParticipant(t *testing.T) {
 			wantError:    true,
 		},
 		{
-			name:         "missing org classification",
+			name:         "standalone user allows missing org classification after participant verification",
 			conversation: slack.Conversation{ID: "D1", User: "U2", IsIM: true},
-			wantError:    true,
+			user:         slack.User{ID: "U2", TeamID: "T1"},
+			wantUserCall: true,
+		},
+		{
+			name:         "missing org classification with stranger participant is external",
+			conversation: slack.Conversation{ID: "D1", User: "U2", IsIM: true},
+			user:         slack.User{ID: "U2", TeamID: "T1", IsStranger: true},
+			want:         slack.SharedStatus{Shared: true, ExternallyShared: true},
+			wantUserCall: true,
+		},
+		{
+			name:         "known organization sharing is preserved",
+			conversation: slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsOrgShared: &yes},
+			user:         slack.User{ID: "U2", TeamID: "T1"},
+			want:         slack.SharedStatus{Shared: true, OrgShared: true},
+			wantUserCall: true,
+		},
+		{
+			name:                 "missing org classification fails for enterprise profile",
+			conversation:         slack.Conversation{ID: "D1", User: "U2", IsIM: true},
+			user:                 slack.User{ID: "U2", TeamID: "T1"},
+			enterpriseID:         "E1",
+			identityEnterpriseID: "E1",
+			wantCode:             "TARGET_SHARED_STATE_UNKNOWN",
+			wantError:            true,
+			wantUserCall:         true,
 		},
 	}
 	for _, test := range tests {
@@ -463,6 +534,8 @@ func TestDirectMessageClassificationValidatesShapeAndParticipant(t *testing.T) {
 			t.Parallel()
 			dependencies, store, api, _ := newTestDependencies(t)
 			p := seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead})
+			p.EnterpriseID = test.enterpriseID
+			api.identity.EnterpriseID = test.identityEnterpriseID
 			api.user = test.user
 			got, err := classifyTarget(context.Background(), dependencies, session{profile: p, token: "sentinel"}, test.conversation)
 			if (err != nil) != test.wantError {
@@ -470,6 +543,9 @@ func TestDirectMessageClassificationValidatesShapeAndParticipant(t *testing.T) {
 			}
 			if err == nil && got != test.want {
 				t.Fatalf("result=%+v want=%+v", got, test.want)
+			}
+			if test.wantCode != "" && errx.As(err).Code != test.wantCode {
+				t.Fatalf("code=%s err=%v", errx.As(err).Code, err)
 			}
 			userCalled := slices.Contains(api.calls, "users.info")
 			if userCalled != test.wantUserCall {
@@ -537,13 +613,12 @@ func TestDirectMessageParticipantWorkspaceIsRevalidatedBeforeContent(t *testing.
 	t.Parallel()
 	dependencies, store, api, stdout := newTestDependencies(t)
 	seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead})
-	no := false
-	api.conversation = slack.Conversation{ID: "D1", User: "U2", IsIM: true, IsOrgShared: &no}
+	api.conversation = slack.Conversation{ID: "D1", User: "U2", IsIM: true}
 	api.user = slack.User{ID: "U2", TeamID: "T1"}
 	if exit := Run(context.Background(), []string{"auth", "allow-reads", "set", "--profile", "work", "--conversation-id", "D1", "--yes"}, dependencies); exit != errx.OK {
 		t.Fatalf("policy exit %d: %s", exit, stdout.String())
 	}
-	if fmt.Sprint(api.calls) != fmt.Sprint([]string{"conversations.info", "users.info"}) {
+	if fmt.Sprint(api.calls) != fmt.Sprint([]string{"conversations.info", "users.info", "auth.test"}) {
 		t.Fatalf("policy calls=%v", api.calls)
 	}
 
@@ -573,6 +648,141 @@ func TestDirectMessageParticipantWorkspaceIsRevalidatedBeforeContent(t *testing.
 	}
 	if len(api.calls) != 0 {
 		t.Fatalf("read-only user profile reached Slack for send: %v", api.calls)
+	}
+}
+
+func TestReadPolicyResetRebindsNewProfileAndDropsOldWrites(t *testing.T) {
+	t.Parallel()
+	dependencies, store, api, stdout := newTestDependencies(t)
+	old := seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead, profile.CapabilityMessageWrite})
+	seedWritePolicy(t, dependencies, old)
+	fresh := old
+	fresh.CredentialGeneration = "g2"
+	if err := dependencies.Profiles.Put(context.Background(), fresh); err != nil {
+		t.Fatal(err)
+	}
+	store.values[fresh.Name] = auth.Credential{Version: 1, Token: "sentinel", ProfileIdentity: profile.Identity(fresh), Generation: fresh.CredentialGeneration, Capabilities: fresh.Capabilities}
+	no := false
+	api.conversation = slack.Conversation{ID: "C1", IsChannel: true, IsShared: &no, IsExtShared: &no, IsOrgShared: &no}
+	args := []string{"auth", "allow-reads", "set", "--profile", "work", "--conversation-id", "C1", "--reset-stale-policy", "--dry-run"}
+	if exit := Run(context.Background(), args, dependencies); exit != errx.OK {
+		t.Fatalf("preview exit=%d output=%s", exit, stdout.String())
+	}
+	preview := decodeEnvelope(t, stdout)["data"].(map[string]any)["policy"].(map[string]any)
+	if preview["generation"] != "g2" || preview["writes"] != nil {
+		t.Fatalf("preview did not drop stale writes: %v", preview)
+	}
+	if _, err := dependencies.Policies.Get(context.Background(), old); err != nil {
+		t.Fatalf("dry-run mutated old policy: %v", err)
+	}
+	if _, err := dependencies.Policies.Get(context.Background(), fresh); !errors.Is(err, policy.ErrBindingMismatch) {
+		t.Fatalf("dry-run rebound policy: %v", err)
+	}
+
+	stdout.Reset()
+	api.calls = nil
+	args[len(args)-1] = "--yes"
+	if exit := Run(context.Background(), args, dependencies); exit != errx.OK {
+		t.Fatalf("apply exit=%d output=%s", exit, stdout.String())
+	}
+	set, err := dependencies.Policies.Get(context.Background(), fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.Reads) != 1 || len(set.Writes) != 0 {
+		t.Fatalf("applied rebind=%+v", set)
+	}
+	if got, want := api.calls, []string{"conversations.info"}; !slices.Equal(got, want) {
+		t.Fatalf("calls=%v want=%v", got, want)
+	}
+}
+
+func TestPolicyResetRejectsWritePolicyAndCurrentBinding(t *testing.T) {
+	t.Parallel()
+	dependencies, store, api, stdout := newTestDependencies(t)
+	p := seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead, profile.CapabilityMessageWrite})
+	no := false
+	api.conversation = slack.Conversation{ID: "C1", IsChannel: true, IsShared: &no, IsExtShared: &no, IsOrgShared: &no}
+	if exit := Run(context.Background(), []string{"auth", "allow-writes", "set", "--profile", "work", "--conversation-id", "C1", "--reset-stale-policy", "--dry-run"}, dependencies); exit != errx.Usage {
+		t.Fatalf("write reset exit=%d output=%s", exit, stdout.String())
+	}
+	if len(api.calls) != 0 {
+		t.Fatalf("write reset reached Slack: %v", api.calls)
+	}
+
+	stdout.Reset()
+	if _, err := dependencies.Policies.Replace(context.Background(), p, policy.Read, []policy.Target{{ConversationID: "C1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if exit := Run(context.Background(), []string{"auth", "allow-reads", "set", "--profile", "work", "--conversation-id", "C1", "--reset-stale-policy", "--dry-run"}, dependencies); exit != errx.Usage {
+		t.Fatalf("current reset exit=%d output=%s", exit, stdout.String())
+	}
+	if code := decodeEnvelope(t, stdout)["error"].(map[string]any)["code"]; code != "STALE_POLICY_REBIND_NOT_REQUIRED" {
+		t.Fatalf("code=%v", code)
+	}
+}
+
+func TestStalePolicyRebindNoopHasStableConflictEnvelope(t *testing.T) {
+	t.Parallel()
+	dependencies, _, _, stdout := newTestDependencies(t)
+	if exit := dependencies.Output.Failure(translate(policy.ErrRebindNotNeeded)); exit != errx.Conflict {
+		t.Fatalf("exit=%d output=%s", exit, stdout.String())
+	}
+	if code := decodeEnvelope(t, stdout)["error"].(map[string]any)["code"]; code != "STALE_POLICY_REBIND_NOT_REQUIRED" {
+		t.Fatalf("code=%v", code)
+	}
+}
+
+func TestConfirmedPolicySetRejectsEnterpriseIdentityDrift(t *testing.T) {
+	t.Parallel()
+	dependencies, store, api, stdout := newTestDependencies(t)
+	p := seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead})
+	api.conversation = slack.Conversation{ID: "D1", User: "U2", IsIM: true}
+	api.user = slack.User{ID: "U2", TeamID: "T1"}
+	api.identity.EnterpriseID = "E1"
+	if exit := Run(context.Background(), []string{"auth", "allow-reads", "set", "--profile", "work", "--conversation-id", "D1", "--yes"}, dependencies); exit != errx.Conflict {
+		t.Fatalf("exit=%d output=%s", exit, stdout.String())
+	}
+	if code := decodeEnvelope(t, stdout)["error"].(map[string]any)["code"]; code != "CREDENTIAL_IDENTITY_CHANGED" {
+		t.Fatalf("code=%v", code)
+	}
+	set, err := dependencies.Policies.Get(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.Reads) != 0 || len(set.Writes) != 0 {
+		t.Fatalf("policy committed after identity drift: %+v", set)
+	}
+	if fmt.Sprint(api.calls) != fmt.Sprint([]string{"conversations.info", "users.info", "auth.test"}) {
+		t.Fatalf("calls=%v", api.calls)
+	}
+}
+
+func TestMissingOrgStateRechecksEnterpriseIdentityBeforeContent(t *testing.T) {
+	t.Parallel()
+	dependencies, store, api, stdout := newTestDependencies(t)
+	seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead})
+	api.conversation = slack.Conversation{ID: "D1", User: "U2", IsIM: true}
+	api.user = slack.User{ID: "U2", TeamID: "T1"}
+	if exit := Run(context.Background(), []string{"auth", "allow-reads", "set", "--profile", "work", "--conversation-id", "D1", "--yes"}, dependencies); exit != errx.OK {
+		t.Fatalf("initial policy exit=%d output=%s", exit, stdout.String())
+	}
+	api.identity.EnterpriseID = "E1"
+	for _, args := range [][]string{
+		{"messages", "history", "--profile", "work", "--conversation-id", "D1", "--limit", "25"},
+		{"messages", "thread", "--profile", "work", "--conversation-id", "D1", "--thread-ts", "1.0", "--limit", "25"},
+	} {
+		api.calls = nil
+		stdout.Reset()
+		if exit := Run(context.Background(), args, dependencies); exit != errx.Conflict {
+			t.Fatalf("args=%v exit=%d output=%s", args, exit, stdout.String())
+		}
+		if code := decodeEnvelope(t, stdout)["error"].(map[string]any)["code"]; code != "CREDENTIAL_IDENTITY_CHANGED" {
+			t.Fatalf("args=%v code=%v", args, code)
+		}
+		if fmt.Sprint(api.calls) != fmt.Sprint([]string{"conversations.info", "users.info", "auth.test"}) {
+			t.Fatalf("args=%v calls=%v", args, api.calls)
+		}
 	}
 }
 
@@ -695,6 +905,31 @@ func TestSendRequiresExactReceiptBeforeNetwork(t *testing.T) {
 	}
 	if store.loads != 0 || len(api.calls) != 0 {
 		t.Fatalf("mismatch crossed boundary: loads=%d calls=%v", store.loads, api.calls)
+	}
+}
+
+func TestConfirmedSendRejectsEnterpriseIdentityDriftBeforePreflight(t *testing.T) {
+	t.Parallel()
+	dependencies, store, api, stdout := newTestDependencies(t)
+	p := seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead, profile.CapabilityMessageWrite})
+	seedWritePolicy(t, dependencies, p)
+	dependencies.Input = bytes.NewBufferString("hello")
+	if exit := Run(context.Background(), []string{"messages", "send", "--profile", "work", "--conversation-id", "C1", "--text-stdin", "--dry-run"}, dependencies); exit != errx.OK {
+		t.Fatalf("dry-run exit=%d output=%s", exit, stdout.String())
+	}
+	receipt := decodeEnvelope(t, stdout)["data"].(map[string]any)["intent_sha256"].(string)
+	api.identity.EnterpriseID = "E1"
+	api.calls = nil
+	stdout.Reset()
+	dependencies.Input = bytes.NewBufferString("hello")
+	if exit := Run(context.Background(), []string{"messages", "send", "--profile", "work", "--conversation-id", "C1", "--text-stdin", "--confirm-intent", receipt, "--yes"}, dependencies); exit != errx.Conflict {
+		t.Fatalf("exit=%d output=%s", exit, stdout.String())
+	}
+	if code := decodeEnvelope(t, stdout)["error"].(map[string]any)["code"]; code != "CREDENTIAL_IDENTITY_CHANGED" {
+		t.Fatalf("code=%v", code)
+	}
+	if fmt.Sprint(api.calls) != fmt.Sprint([]string{"auth.test"}) {
+		t.Fatalf("identity drift reached target or write preflight: %v", api.calls)
 	}
 }
 

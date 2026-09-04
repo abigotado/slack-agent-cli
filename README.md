@@ -81,11 +81,19 @@ release tag and commit in `slack-agent-cli version`.
 
 ## Create explicit profiles
 
-Create one Slack app/token with only the scopes needed by the typed commands.
-For public and private channels with message writes, use bot scopes
-`channels:history`, `channels:read`, `groups:history`, `groups:read`,
-`users:read`, and `chat:write`. The bot still needs membership in private
-channels and in any channel where it will write.
+For one operator's workspace, use one separate user-only Slack app/token and
+one named profile. The canonical `user-workspace-message-write` manifest has
+user scopes `channels:history`, `channels:read`, `groups:history`,
+`groups:read`, `im:history`, `im:read`, `mpim:history`, `mpim:read`,
+`users:read`, and `chat:write`. It acts as the authorizing user for exact
+allowlisted public channels, private channels, one-to-one DMs, group DMs, and
+confirmed sends. It does not include a bot, search, files, reactions, admin,
+events, redirects, or `chat:write.public`.
+
+The runtime remains smaller than a general Slack connector: it cannot search
+or read arbitrary content, every target needs explicit exact-ID policy, and
+writes still need a local dry-run receipt and exact confirmation. Private
+channels, DMs, and group DMs must be accessible to the authorizing user.
 
 The CLI verifies the token with `auth.test` before committing the profile.
 Enter it directly into the hidden controlling-terminal prompt:
@@ -93,7 +101,7 @@ Enter it directly into the hidden controlling-terminal prompt:
 ```sh
 slack-agent-cli auth login \
   --profile bangr \
-  --token-kind bot \
+  --token-kind user \
   --capability read \
   --capability message-write \
   --token-tty
@@ -109,16 +117,15 @@ slack-agent-cli auth status --profile bangr
 slack-agent-cli auth status --profile bangr --check
 ```
 
-### Read human-to-human direct messages
+### Narrow direct-message-only profile
 
-A bot token cannot read a direct message between human users. Use a separate
-least-privilege user-only Slack app and a separate profile; do not add user
-scopes to the existing bot app. The embedded `slack-app-provisioning` Skill
-provides the canonical `user-direct-message-read-only` manifest with user
-scopes `im:read`, `im:history`, and `users:read`. The last scope verifies the
-other DM participant's workspace and also permits the fixed `users get`
-command to inspect any exact valid user ID. The CLI exposes no user listing or
-search operation.
+For a workflow that needs only human one-to-one DMs, the embedded
+`slack-app-provisioning` Skill also provides the narrower
+`user-direct-message-read-only` manifest with user scopes `im:read`,
+`im:history`, and `users:read`. The last scope verifies the other DM
+participant's workspace and also permits the fixed `users get` command to
+inspect any exact valid user ID. The CLI exposes no user listing or search
+operation.
 
 After the human-only Slack installation has issued a User OAuth Token, import
 it directly through the hidden terminal prompt. This command does not create a
@@ -179,6 +186,12 @@ slack-agent-cli auth allow-writes set \
   --conversation-id C0123456789 \
   --yes
 ```
+
+If an explicitly confirmed re-login replaces a profile's identity or credential
+generation, its existing policy is intentionally stale. Use a reviewed
+`allow-reads set` with `--reset-stale-policy` once to replace that binding;
+the transition drops all old write targets and installs only the displayed
+exact read IDs. Rebuild the write policy afterwards.
 
 ## Bounded reads
 

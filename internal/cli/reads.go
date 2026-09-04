@@ -24,8 +24,8 @@ func newMeCommand(dependencies Dependencies) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if identity.WorkspaceID != current.profile.WorkspaceID || identity.UserID != current.profile.UserID || identity.BotID != current.profile.BotID {
-			return errx.New(errx.Conflict, "CREDENTIAL_IDENTITY_CHANGED", "credential identity no longer matches profile", "login the exact profile again")
+		if !identityMatchesProfile(current.profile, identity) {
+			return credentialIdentityChanged()
 		}
 		return dependencies.Output.Success(identity, &output.Meta{Profile: name, WorkspaceID: identity.WorkspaceID, ContentTrust: "untrusted"})
 	}}

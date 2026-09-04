@@ -100,7 +100,7 @@ SANITIZED_PREFIX app install --team TEAM_ID --environment local --skip-update --
 slack-agent-cli auth login --profile PROFILE --token-kind bot \
   --capability read [--capability message-write] --token-tty
 slack-agent-cli auth login --profile PROFILE --token-kind user \
-  --capability read --token-tty
+  --capability read [--capability message-write] --token-tty
 ```
 
 The operator executes the `/slackauthticket` in the intended workspace and

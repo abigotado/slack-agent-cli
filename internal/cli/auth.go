@@ -128,8 +128,8 @@ func newAuthStatusCommand(dependencies Dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if identity.WorkspaceID != value.WorkspaceID || identity.UserID != value.UserID || identity.BotID != value.BotID {
-				return errx.New(errx.Conflict, "CREDENTIAL_IDENTITY_CHANGED", "credential identity no longer matches profile", "login the exact profile again")
+			if !identityMatchesProfile(value, identity) {
+				return credentialIdentityChanged()
 			}
 			data["credential_checked"] = true
 		}
@@ -220,13 +220,14 @@ func newPolicyShow(dependencies Dependencies, kind policy.Kind) *cobra.Command {
 func newPolicySet(dependencies Dependencies, kind policy.Kind) *cobra.Command {
 	var name string
 	var ids []string
-	var allowShared, dryRun, yes bool
+	var allowShared, resetStalePolicy, dryRun, yes bool
 	command := &cobra.Command{Use: "set", Args: exactArgs(0), RunE: func(command *cobra.Command, _ []string) error {
-		return executePolicySet(command.Context(), dependencies, name, kind, ids, allowShared, dryRun, yes)
+		return executePolicySet(command.Context(), dependencies, name, kind, ids, allowShared, resetStalePolicy, dryRun, yes)
 	}}
 	command.Flags().StringVar(&name, "profile", "", "exact profile name")
 	command.Flags().StringSliceVar(&ids, "conversation-id", nil, "exact conversation ID (repeatable)")
 	command.Flags().BoolVar(&allowShared, "allow-slack-connect", false, "explicitly allow shared/external conversations")
+	command.Flags().BoolVar(&resetStalePolicy, "reset-stale-policy", false, "replace a stale read policy and discard its old write targets")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "validate without changing policy")
 	command.Flags().BoolVar(&yes, "yes", false, "apply exact policy change")
 	return command
@@ -263,7 +264,7 @@ func newPolicyClear(dependencies Dependencies, kind policy.Kind) *cobra.Command 
 	command.Flags().BoolVar(&yes, "yes", false, "apply exact change")
 	return command
 }
-func executePolicySet(ctx context.Context, dependencies Dependencies, name string, kind policy.Kind, ids []string, allowShared, dryRun, yes bool) error {
+func executePolicySet(ctx context.Context, dependencies Dependencies, name string, kind policy.Kind, ids []string, allowShared, resetStalePolicy, dryRun, yes bool) error {
 	if err := requireProfile(name); err != nil {
 		return err
 	}
@@ -276,6 +277,9 @@ func executePolicySet(ctx context.Context, dependencies Dependencies, name strin
 	if dryRun == yes {
 		return usageError("POLICY_CONFIRMATION_REQUIRED", "choose exactly one of --dry-run or --yes", nil)
 	}
+	if resetStalePolicy && kind != policy.Read {
+		return usageError("STALE_POLICY_REBIND_READ_ONLY", "--reset-stale-policy is valid only for allow-reads set", nil)
+	}
 	capability := profile.CapabilityRead
 	if kind == policy.Write {
 		capability = profile.CapabilityMessageWrite
@@ -283,6 +287,13 @@ func executePolicySet(ctx context.Context, dependencies Dependencies, name strin
 	current, err := loadSession(ctx, dependencies, name, capability)
 	if err != nil {
 		return err
+	}
+	if resetStalePolicy {
+		if _, err := dependencies.Policies.Get(ctx, current.profile); err == nil {
+			return usageError("STALE_POLICY_REBIND_NOT_REQUIRED", "policy binding is already current", nil)
+		} else if !errors.Is(err, policy.ErrBindingMismatch) {
+			return err
+		}
 	}
 	targets := make([]policy.Target, 0, len(ids))
 	seen := map[string]bool{}
@@ -312,13 +323,23 @@ func executePolicySet(ctx context.Context, dependencies Dependencies, name strin
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].ConversationID < targets[j].ConversationID })
 	if dryRun {
-		preview, err := dependencies.Policies.PreviewReplace(ctx, current.profile, kind, targets)
+		var preview policy.Set
+		if resetStalePolicy {
+			preview, err = dependencies.Policies.PreviewRebindRead(ctx, current.profile, targets)
+		} else {
+			preview, err = dependencies.Policies.PreviewReplace(ctx, current.profile, kind, targets)
+		}
 		if err != nil {
 			return err
 		}
 		return dependencies.Output.Success(map[string]any{"policy": preview, "applied": false, "remote_checks": "performed"}, &output.Meta{Profile: name, WorkspaceID: current.profile.WorkspaceID})
 	}
-	set, err := dependencies.Policies.Replace(ctx, current.profile, kind, targets)
+	var set policy.Set
+	if resetStalePolicy {
+		set, err = dependencies.Policies.RebindRead(ctx, current.profile, targets)
+	} else {
+		set, err = dependencies.Policies.Replace(ctx, current.profile, kind, targets)
+	}
 	if err != nil {
 		return err
 	}

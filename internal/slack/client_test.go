@@ -193,6 +193,32 @@ func TestConversationClassificationFailsClosed(t *testing.T) {
 	}
 }
 
+func TestUserInfoProjectsStrangerInternally(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/users.info" || r.Method != http.MethodGet {
+			t.Fatalf("request %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"user":{"id":"U2","team_id":"T1","is_stranger":true}}`))
+	}))
+	defer server.Close()
+	client := newTestClient(server.URL, server.Client())
+	user, err := client.UserInfo(context.Background(), Token("sentinel"), "U2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !user.IsStranger {
+		t.Fatal("is_stranger was not projected")
+	}
+	payload, err := json.Marshal(user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), "is_stranger") {
+		t.Fatalf("internal stranger classification leaked: %s", payload)
+	}
+}
+
 func TestOnlyOneJSONObjectAccepted(t *testing.T) {
 	t.Parallel()
 	payload, _ := json.Marshal(authTestEnvelope{OK: true, TeamID: "T1"})

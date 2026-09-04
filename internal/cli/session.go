@@ -68,7 +68,7 @@ func classifyTarget(ctx context.Context, dependencies Dependencies, current sess
 	}
 	directID := strings.HasPrefix(conversation.ID, "D")
 	if directID || conversation.IsIM {
-		if !directID || !conversation.IsIM || conversation.IsChannel || conversation.IsMPIM || conversation.IsOrgShared == nil {
+		if !directID || !conversation.IsIM || conversation.IsChannel || conversation.IsMPIM {
 			return slack.SharedStatus{}, targetSharedStateUnknown()
 		}
 		if err := profile.ValidateSlackID(conversation.User); err != nil {
@@ -83,9 +83,24 @@ func classifyTarget(ctx context.Context, dependencies Dependencies, current sess
 		}
 		shared := flagTrue(conversation.IsShared)
 		external := flagTrue(conversation.IsExtShared)
-		org := *conversation.IsOrgShared
-		if participant.TeamID != current.profile.WorkspaceID {
+		org := flagTrue(conversation.IsOrgShared)
+		if participant.TeamID != current.profile.WorkspaceID || participant.IsStranger {
 			external = true
+		}
+		if conversation.IsOrgShared == nil && !shared && !external {
+			if current.profile.TokenKind != profile.TokenUser || current.profile.EnterpriseID != "" {
+				return slack.SharedStatus{}, targetSharedStateUnknown()
+			}
+			identity, err := dependencies.Auth.AuthTest(ctx, current.token)
+			if err != nil {
+				return slack.SharedStatus{}, err
+			}
+			if !identityMatchesProfile(current.profile, identity) {
+				return slack.SharedStatus{}, credentialIdentityChanged()
+			}
+			if identity.EnterpriseID != "" {
+				return slack.SharedStatus{}, targetSharedStateUnknown()
+			}
 		}
 		return slack.SharedStatus{Shared: shared || external || org, ExternallyShared: external, OrgShared: org}, nil
 	}
@@ -97,6 +112,14 @@ func classifyTarget(ctx context.Context, dependencies Dependencies, current sess
 }
 
 func flagTrue(value *bool) bool { return value != nil && *value }
+
+func identityMatchesProfile(value profile.Profile, identity slack.Identity) bool {
+	return identity.WorkspaceID == value.WorkspaceID && identity.UserID == value.UserID && identity.BotID == value.BotID && identity.EnterpriseID == value.EnterpriseID
+}
+
+func credentialIdentityChanged() error {
+	return errx.New(errx.Conflict, "CREDENTIAL_IDENTITY_CHANGED", "credential identity no longer matches profile", "login the exact profile again")
+}
 
 func targetSharedStateUnknown() error {
 	return errxPermission("TARGET_SHARED_STATE_UNKNOWN", "Slack did not provide a trustworthy target classification")

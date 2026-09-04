@@ -64,13 +64,14 @@ type apiEnvelope struct {
 	Channel      Conversation   `json:"channel"`
 	Messages     []Message      `json:"messages"`
 	User         struct {
-		ID       string `json:"id"`
-		TeamID   string `json:"team_id"`
-		Name     string `json:"name"`
-		RealName string `json:"real_name"`
-		Deleted  bool   `json:"deleted"`
-		IsBot    bool   `json:"is_bot"`
-		Profile  struct {
+		ID         string `json:"id"`
+		TeamID     string `json:"team_id"`
+		Name       string `json:"name"`
+		RealName   string `json:"real_name"`
+		Deleted    bool   `json:"deleted"`
+		IsBot      bool   `json:"is_bot"`
+		IsStranger bool   `json:"is_stranger"`
+		Profile    struct {
 			DisplayName string `json:"display_name"`
 			RealName    string `json:"real_name"`
 		} `json:"profile"`
@@ -202,7 +203,7 @@ func (c *Client) UserInfo(ctx context.Context, token Token, userID string) (User
 	if err := c.call(ctx, token, http.MethodGet, "users.info", url.Values{"user": {userID}}, &response, readOperation); err != nil {
 		return User{}, err
 	}
-	return User{ID: response.User.ID, TeamID: response.User.TeamID, Name: response.User.Name, RealName: response.User.RealName, DisplayName: response.User.Profile.DisplayName, Deleted: response.User.Deleted, IsBot: response.User.IsBot}, nil
+	return User{ID: response.User.ID, TeamID: response.User.TeamID, Name: response.User.Name, RealName: response.User.RealName, DisplayName: response.User.Profile.DisplayName, Deleted: response.User.Deleted, IsBot: response.User.IsBot, IsStranger: response.User.IsStranger}, nil
 }
 
 // PostMessage dispatches exactly one bounded plain-text message request.

@@ -87,5 +87,42 @@ user-only shape. Local inspection and `manifest validate` are necessary but
 not sufficient. Apply the live, human-only acceptance gate in
 [state-machine.md](state-machine.md) before treating the variant as usable.
 
+## `user-workspace-message-write`
+
+Asset: `assets/manifests/user-workspace-message-write.json`
+
+User scopes:
+
+```text
+channels:history
+channels:read
+chat:write
+groups:history
+groups:read
+im:history
+im:read
+mpim:history
+mpim:read
+users:read
+```
+
+Use with runtime capabilities `read` and `message-write`. This is the single
+user-identity variant for an operator who wants the agent to act as them
+across exact allowlisted public channels, private channels, one-to-one DMs,
+and group DMs. It has no bot user, bot scopes, redirect URLs, events, search,
+files, reactions, admin, or `chat:write.public` grant. The fixed runtime still
+cannot search Slack, access files, create conversations, or send without a
+local receipt and exact confirmation.
+
+User tokens can read public channels visible to the workspace and can access
+private channels, DMs, and group DMs only where the authorizing user has
+access. Every content target remains an exact-ID policy; Slack Connect needs
+an additional explicit opt-in. Group DM support is conditional on the live
+acceptance gate: if its `conversations.info` shape omits the shared-state
+fields required by the runtime, do not claim support or weaken classification.
+
+Provision this as a new separate user-only app. Never add user scopes to an
+existing bot app, and never overwrite an installed app to broaden it.
+
 Before validation or handoff, hash the exact selected manifest and show the
 SHA-256 to the operator. Never accept an edited or merged manifest.

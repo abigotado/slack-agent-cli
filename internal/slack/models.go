@@ -98,6 +98,7 @@ type User struct {
 	DisplayName string `json:"display_name"`
 	Deleted     bool   `json:"deleted"`
 	IsBot       bool   `json:"is_bot"`
+	IsStranger  bool   `json:"-"`
 }
 
 // ListOptions defines bounded conversation discovery.
