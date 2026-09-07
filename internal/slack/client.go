@@ -25,6 +25,7 @@ type operationClass int
 const (
 	readOperation operationClass = iota
 	writeOperation
+	downloadOperation
 )
 
 // Client exposes only the fixed typed Slack Web API matrix.
@@ -162,6 +163,9 @@ func (c *Client) History(ctx context.Context, token Token, options HistoryOption
 	if options.Cursor != "" {
 		values.Set("cursor", options.Cursor)
 	}
+	if options.Inclusive {
+		values.Set("inclusive", "true")
+	}
 	if options.Oldest != "" {
 		values.Set("oldest", options.Oldest)
 	}
@@ -186,6 +190,15 @@ func (c *Client) Replies(ctx context.Context, token Token, options ThreadOptions
 	values := url.Values{"channel": {options.ConversationID}, "ts": {options.ThreadTS}, "limit": {strconv.Itoa(options.Limit)}}
 	if options.Cursor != "" {
 		values.Set("cursor", options.Cursor)
+	}
+	if options.Oldest != "" {
+		values.Set("oldest", options.Oldest)
+	}
+	if options.Latest != "" {
+		values.Set("latest", options.Latest)
+	}
+	if options.Inclusive {
+		values.Set("inclusive", "true")
 	}
 	var response apiEnvelope
 	if err := c.call(ctx, token, http.MethodGet, "conversations.replies", values, &response, readOperation); err != nil {
@@ -291,47 +304,16 @@ func (c *Client) call(ctx context.Context, token Token, method, route string, va
 	if err != nil {
 		return errx.New(errx.Internal, "REQUEST_BUILD_FAILED", "failed to build Slack request", "report this defect").Wrap(err)
 	}
-	request.Header.Set("Authorization", "Bearer "+string(token))
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Accept-Encoding", "gzip")
 	if method == http.MethodPost {
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
-	if err := ctx.Err(); err != nil {
-		if class == writeOperation {
-			return errx.New(errx.Conflict, "WRITE_NOT_STARTED", "write was cancelled before dispatch", "create a fresh dry-run before deciding whether to send").WithStage(errx.StagePreDispatch).Wrap(err)
-		}
-		return networkError(class, errx.StagePreDispatch, err)
-	}
-	response, err := c.httpClient.Do(request)
+	response, err := c.do(ctx, token, request, class)
 	if err != nil {
-		return networkError(class, errx.StageTransport, err)
+		return err
 	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode >= 300 && response.StatusCode < 400 {
-		if class == writeOperation {
-			return networkError(class, errx.StageHTTPResponse, errors.New("slack redirect after dispatch"))
-		}
-		return errx.New(errx.Internal, "REDIRECT_REJECTED", "Slack redirect was rejected", "report unexpected Slack endpoint behavior")
-	}
-	if response.StatusCode == http.StatusTooManyRequests {
-		return retryAfterError(response.Header.Get("Retry-After"), class)
-	}
-	if response.StatusCode >= 500 {
-		return networkError(class, errx.StageHTTPServer, errors.New("slack server failure"))
-	}
-	if response.StatusCode == http.StatusUnauthorized {
-		return errx.New(errx.Auth, "SLACK_AUTH_REJECTED", "Slack rejected the credential", "login or rotate this profile")
-	}
-	if response.StatusCode == http.StatusForbidden {
-		return errx.New(errx.PermissionDenied, "SLACK_PERMISSION_DENIED", "Slack denied the operation", "request the required Slack permission")
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		if class == writeOperation {
-			return networkError(class, errx.StageHTTPResponse, errors.New("unexpected Slack write HTTP status"))
-		}
-		return errx.New(errx.Internal, "SLACK_HTTP_ERROR", "Slack returned an unexpected HTTP status", "report this response class")
-	}
+	defer func() { _ = response.Body.Close() }() // The bounded read below owns response errors.
 	payload, err := readResponse(response)
 	if err != nil {
 		return networkError(class, errx.StageResponseBody, err)
@@ -446,7 +428,7 @@ func slackError(code string, class operationClass) error {
 	switch code {
 	case "invalid_auth", "account_inactive", "token_revoked", "not_authed":
 		return errx.New(errx.Auth, "SLACK_AUTH_REJECTED", "Slack rejected the credential", "login or rotate this profile")
-	case "channel_not_found", "user_not_found", "message_not_found", "thread_not_found":
+	case "channel_not_found", "user_not_found", "message_not_found", "thread_not_found", "file_not_found":
 		return errx.New(errx.NotFound, "SLACK_OBJECT_NOT_FOUND", "Slack object was not found or is not visible", "verify the exact ID and profile")
 	case "missing_scope", "not_allowed_token_type", "restricted_action", "access_denied":
 		return errx.New(errx.PermissionDenied, "SLACK_PERMISSION_DENIED", "Slack denied the operation", "request the required Slack scope or permission")

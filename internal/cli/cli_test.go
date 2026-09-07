@@ -40,13 +40,16 @@ func (s *fakeStore) Save(_ context.Context, name string, value auth.Credential) 
 func (s *fakeStore) Delete(_ context.Context, name string) error { delete(s.values, name); return nil }
 
 type fakeSlack struct {
-	identity     slack.Identity
-	conversation slack.Conversation
-	messages     slack.MessagePage
-	user         slack.User
-	calls        []string
-	postResult   slack.PostResult
-	postErr      error
+	historyOptions []slack.HistoryOptions
+	replyOptions   []slack.ThreadOptions
+	replyPages     []slack.MessagePage
+	identity       slack.Identity
+	conversation   slack.Conversation
+	messages       slack.MessagePage
+	user           slack.User
+	calls          []string
+	postResult     slack.PostResult
+	postErr        error
 }
 
 func (s *fakeSlack) AuthTest(context.Context, slack.Token) (slack.Identity, error) {
@@ -61,12 +64,19 @@ func (s *fakeSlack) ConversationInfo(context.Context, slack.Token, string) (slac
 	s.calls = append(s.calls, "conversations.info")
 	return s.conversation, nil
 }
-func (s *fakeSlack) History(context.Context, slack.Token, slack.HistoryOptions) (slack.MessagePage, error) {
+func (s *fakeSlack) History(_ context.Context, _ slack.Token, options slack.HistoryOptions) (slack.MessagePage, error) {
+	s.historyOptions = append(s.historyOptions, options)
 	s.calls = append(s.calls, "conversations.history")
 	return s.messages, nil
 }
-func (s *fakeSlack) Replies(context.Context, slack.Token, slack.ThreadOptions) (slack.MessagePage, error) {
+func (s *fakeSlack) Replies(_ context.Context, _ slack.Token, options slack.ThreadOptions) (slack.MessagePage, error) {
+	s.replyOptions = append(s.replyOptions, options)
 	s.calls = append(s.calls, "conversations.replies")
+	if len(s.replyPages) > 0 {
+		page := s.replyPages[0]
+		s.replyPages = s.replyPages[1:]
+		return page, nil
+	}
 	return s.messages, nil
 }
 func (s *fakeSlack) UserInfo(_ context.Context, _ slack.Token, id string) (slack.User, error) {
@@ -95,7 +105,7 @@ func newTestDependencies(t *testing.T) (Dependencies, *fakeStore, *fakeSlack, *b
 	store := &fakeStore{values: map[string]auth.Credential{}}
 	api := &fakeSlack{identity: slack.Identity{WorkspaceID: "T1", WorkspaceName: "Example", WorkspaceURL: "https://example.slack.com/", UserID: "U1"}}
 	stdout := &bytes.Buffer{}
-	return Dependencies{Profiles: profiles, Policies: policies, Credentials: store, Auth: api, Conversations: api, Messages: api, Users: api, Writes: api, WriteState: &writestate.Tracker{}, Input: bytes.NewBuffer(nil), TokenTTY: func() (string, error) { return "", auth.ErrTTYUnavailable }, Output: &output.Writer{Out: stdout, Err: &bytes.Buffer{}}}, store, api, stdout
+	return Dependencies{Profiles: profiles, Policies: policies, Credentials: store, Auth: api, Conversations: api, Messages: api, Users: api, Files: &fakeFiles{}, Writes: api, WriteState: &writestate.Tracker{}, Input: bytes.NewBuffer(nil), TokenTTY: func() (string, error) { return "", auth.ErrTTYUnavailable }, Output: &output.Writer{Out: stdout, Err: &bytes.Buffer{}}}, store, api, stdout
 }
 
 func decodeEnvelope(t *testing.T, buffer *bytes.Buffer) map[string]any {
@@ -109,7 +119,7 @@ func decodeEnvelope(t *testing.T, buffer *bytes.Buffer) map[string]any {
 
 func TestNonLeafCommandsReturnMachineUsage(t *testing.T) {
 	t.Parallel()
-	for _, args := range [][]string{nil, {"auth"}, {"messages"}, {"help"}, {"help", "auth"}} {
+	for _, args := range [][]string{nil, {"auth"}, {"messages"}, {"files"}, {"help"}, {"help", "auth"}} {
 		dependencies, _, _, stdout := newTestDependencies(t)
 		if exit := Run(context.Background(), args, dependencies); exit != errx.Usage {
 			t.Fatalf("args=%v exit=%d output=%q", args, exit, stdout.String())
@@ -143,18 +153,24 @@ func seedSession(t *testing.T, dependencies Dependencies, store *fakeStore, capa
 
 func TestNetworkCommandRequiresExplicitProfile(t *testing.T) {
 	t.Parallel()
-	dependencies, _, api, stdout := newTestDependencies(t)
-	status := Run(context.Background(), []string{"conversations", "list", "--types", "public_channel", "--limit", "25"}, dependencies)
-	if status != errx.Usage {
-		t.Fatalf("status %d", status)
-	}
-	envelope := decodeEnvelope(t, stdout)
-	body := envelope["error"].(map[string]any)
-	if body["code"] != "PROFILE_REQUIRED" {
-		t.Fatalf("bad envelope: %v", envelope)
-	}
-	if len(api.calls) != 0 {
-		t.Fatalf("network called: %v", api.calls)
+	for _, args := range [][]string{
+		{"conversations", "list", "--types", "public_channel", "--limit", "25"},
+		{"files", "get", "F1", "--conversation-id", "C1", "--message-ts", "1.0"},
+		{"files", "download", "F1", "--conversation-id", "C1", "--message-ts", "1.0", "--output", "video.mp4"},
+	} {
+		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
+			dependencies, store, api, stdout := newTestDependencies(t)
+			if status := Run(context.Background(), args, dependencies); status != errx.Usage {
+				t.Fatalf("status %d", status)
+			}
+			envelope := decodeEnvelope(t, stdout)
+			if envelope["error"].(map[string]any)["code"] != "PROFILE_REQUIRED" {
+				t.Fatalf("bad envelope: %v", envelope)
+			}
+			if len(api.calls) != 0 || len(dependencies.Files.(*fakeFiles).calls) != 0 || store.loads != 0 {
+				t.Fatal("missing profile reached credentials or network")
+			}
+		})
 	}
 }
 

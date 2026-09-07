@@ -14,6 +14,7 @@ Bot scopes:
 ```text
 channels:history
 channels:read
+files:read
 users:read
 ```
 
@@ -29,6 +30,7 @@ Bot scopes:
 channels:history
 channels:read
 chat:write
+files:read
 users:read
 ```
 
@@ -45,6 +47,7 @@ Bot scopes:
 channels:history
 channels:read
 chat:write
+files:read
 groups:history
 groups:read
 users:read
@@ -63,6 +66,7 @@ Asset: `assets/manifests/user-direct-message-read-only.json`
 User scopes:
 
 ```text
+files:read
 im:history
 im:read
 users:read
@@ -97,6 +101,7 @@ User scopes:
 channels:history
 channels:read
 chat:write
+files:read
 groups:history
 groups:read
 im:history
@@ -110,8 +115,8 @@ Use with runtime capabilities `read` and `message-write`. This is the single
 user-identity variant for an operator who wants the agent to act as them
 across exact allowlisted public channels, private channels, one-to-one DMs,
 and group DMs. It has no bot user, bot scopes, redirect URLs, events, search,
-files, reactions, admin, or `chat:write.public` grant. The fixed runtime still
-cannot search Slack, access files, create conversations, or send without a
+reactions, admin, or `chat:write.public` grant. The fixed runtime still
+cannot search Slack, create conversations, or send without a
 local receipt and exact confirmation.
 
 User tokens can read public channels visible to the workspace and can access
@@ -126,3 +131,19 @@ existing bot app, and never overwrite an installed app to broaden it.
 
 Before validation or handoff, hash the exact selected manifest and show the
 SHA-256 to the operator. Never accept an edited or merged manifest.
+
+## File reads and existing installations
+
+All five variants include `files:read` for the fixed `files get` and
+`files download` commands. This grants neither file upload nor deletion.
+Files must be attached to an exact message in a read-allowlisted conversation.
+Hosted downloads are restricted to the selected workspace and 250 MiB.
+
+Existing installations do not gain scopes from a CLI update. The operator
+must authorize the updated scopes in Slack (reinstall/reauthorize the app),
+then import the resulting credential using `auth login` for the exact profile.
+The runtime Skill cannot perform this administrative step. Re-login changes
+credential generation and invalidates old policies. Review the complete target
+set, run `auth allow-reads set --reset-stale-policy --dry-run`, then apply that
+exact set with `--yes`. This clears old write targets; rebuild write policy
+separately after review. Never add a requested channel implicitly.

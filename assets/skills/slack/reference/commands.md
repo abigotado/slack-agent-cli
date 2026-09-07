@@ -27,6 +27,10 @@ slack-agent-cli messages history --profile NAME --conversation-id ID --limit N \
 slack-agent-cli messages thread --profile NAME --conversation-id ID \
   --thread-ts TS --limit N [--cursor CURSOR]
 slack-agent-cli users get USER_ID --profile NAME
+slack-agent-cli files get FILE_ID --profile NAME --conversation-id ID \
+  --message-ts TS [--thread-ts PARENT_TS]
+slack-agent-cli files download FILE_ID --profile NAME --conversation-id ID \
+  --message-ts TS [--thread-ts PARENT_TS] --output PATH
 
 slack-agent-cli messages send --profile NAME --conversation-id ID \
   [--thread-ts TS] --text-stdin --dry-run

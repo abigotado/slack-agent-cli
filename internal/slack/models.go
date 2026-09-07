@@ -74,6 +74,7 @@ type ConversationSummary struct {
 
 // Message is a minimal untrusted message projection.
 type Message struct {
+	Files      []File `json:"files,omitempty"`
 	Type       string `json:"type"`
 	User       string `json:"user,omitempty"`
 	BotID      string `json:"bot_id,omitempty"`
@@ -110,6 +111,7 @@ type ListOptions struct {
 
 // HistoryOptions defines a bounded exact-conversation history read.
 type HistoryOptions struct {
+	Inclusive      bool
 	ConversationID string
 	Limit          int
 	Cursor         string
@@ -119,6 +121,9 @@ type HistoryOptions struct {
 
 // ThreadOptions defines a bounded exact thread read.
 type ThreadOptions struct {
+	Oldest         string
+	Latest         string
+	Inclusive      bool
 	ConversationID string
 	ThreadTS       string
 	Limit          int

@@ -77,3 +77,30 @@ only this emergency marker for that failure:
 ```text
 SLACK_AGENT_CLI_CONFIRMED_WRITE_OUTPUT_FAILURE
 ```
+
+## File reads
+
+`files get FILE_ID --profile NAME --conversation-id ID --message-ts TS`
+returns typed file metadata after verifying attachment to that exact message.
+`files download` accepts the same flags plus required `--output PATH`; use
+`--thread-ts PARENT_TS` with either command for reply attachments. Every read
+uses the existing identity/generation-bound conversation policy.
+
+The additive `files` array in messages omits download URLs and previews.
+Downloads return `{file, path, bytes, sha256}` in `data`, with untrusted metadata.
+Binary bytes go only to a new 0600 local file. No overwrite or automatic retry
+is performed. Supported downloads use only HTTPS `files.slack.com` and the
+`/files-pri/WORKSPACE_ID-FILE_ID/` path. External files, redirects, query URLs and
+files hosted by another workspace are rejected. Enterprise Grid E-owned file
+paths are unsupported; only the selected T-workspace prefix is accepted. Maximum size is 262144000
+bytes and deadline 120000 ms, exposed in additive contract limits. The stream
+may read one extra byte solely to detect overflow; failed partials are removed.
+
+`FILE_NOT_IN_MESSAGE` is exit 3; `FILE_DOWNLOAD_UNSUPPORTED` and
+`FILE_REDIRECT_REJECTED` are exit 8; `FILE_TOO_LARGE` is exit 2.
+`FILE_OUTPUT_EXISTS` is exit 9. `FILE_OUTPUT_FAILED` (including local disk
+write failures) and `FILE_CONTENT_UNSUPPORTED` (size mismatch, non-identity
+encoding, or HTML for non-HTML metadata) are exit 1: do not retry unchanged.
+Publication uses atomic no-overwrite rename; failures do not publish partials.
+If temporary cleanup fails, the primary error code/exit is retained with a safe
+cleanup warning in its hint. Inspect the directory before retrying.

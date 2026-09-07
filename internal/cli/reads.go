@@ -148,8 +148,8 @@ func newHistoryCommand(dependencies Dependencies) *cobra.Command {
 	command.Flags().StringVar(&conversationID, "conversation-id", "", "exact conversation ID")
 	command.Flags().IntVar(&limit, "limit", 0, "page size 1-100")
 	command.Flags().StringVar(&cursorValue, "cursor", "", "bound cursor from prior response")
-	command.Flags().StringVar(&oldest, "oldest", "", "inclusive oldest Slack timestamp")
-	command.Flags().StringVar(&latest, "latest", "", "inclusive latest Slack timestamp")
+	command.Flags().StringVar(&oldest, "oldest", "", "exclusive oldest Slack timestamp")
+	command.Flags().StringVar(&latest, "latest", "", "exclusive latest Slack timestamp")
 	return command
 }
 

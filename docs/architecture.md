@@ -71,11 +71,12 @@ GET  https://slack.com/api/conversations.list
 GET  https://slack.com/api/conversations.info
 GET  https://slack.com/api/conversations.history
 GET  https://slack.com/api/conversations.replies
+GET  https://slack.com/api/files.info
 GET  https://slack.com/api/users.info
 POST https://slack.com/api/chat.postMessage
 ```
 
-Every response has compressed and decompressed byte bounds, a deadline, and a
+Every Web API response has compressed and decompressed byte bounds, a deadline, and a
 typed DTO. Redirects are disabled. Upstream bodies, request URLs, headers,
 tokens, and outbound message text do not enter errors or logs. HTTP success is
 not API success until the bounded JSON object has `ok: true`.
@@ -102,7 +103,7 @@ workspace profile uses a separate user-only Slack app, never user scopes on an
 existing bot app. Its canonical message-write scopes are
 `channels:history`, `channels:read`, `groups:history`, `groups:read`,
 `im:history`, `im:read`, `mpim:history`, `mpim:read`, `users:read`, and
-`chat:write`. The runtime has no bot identity, search, files, reactions,
+`chat:write`, and `files:read`. The runtime has no bot identity, search, reactions,
 admin, events, redirects, `chat:write.public`, or arbitrary API surface.
 Every target remains behind an identity- and generation-bound exact-ID policy;
 writes remain a subset of reads and require a receipt plus confirmation.
@@ -140,8 +141,30 @@ Without that flag, stale policy remains a conflict and cannot be used.
 
 Slack messages, names, topics, purposes, profiles, links, file metadata, and
 previews are untrusted. Content-bearing envelopes include
-`meta.content_trust: "untrusted"`. The v0.1 surface does not download files or
-follow returned URLs.
+`meta.content_trust: "untrusted"`. File attachment metadata is projected into history and thread messages.
+`files get` and `files download` require a read-policy preflight and an exact
+message read proving the file ID before calling `files.info`. Reply attachments
+require their parent thread timestamp. The exact inclusive timestamp window
+uses at most two pages of two messages and tolerates a leading parent without
+treating it as proof of attachment. Private URLs remain inside the transport.
+
+The additional download route is fixed to HTTPS `files.slack.com`, with a
+`/files-pri/WORKSPACE_ID-FILE_ID/` path bound to the selected workspace and
+verified file. Only hosted, non-external files are supported; remote-workspace
+Slack Connect downloads, Enterprise Grid E-owned file paths, query URLs, redirects, and arbitrary origins are
+rejected. The download streams at most the declared size plus one byte, up to
+250 MiB plus one overflow-detection byte, within two minutes, checks the exact
+size, and returns a SHA-256 digest. It accepts only identity encoding (case
+insensitive), rejecting HTML responses unless metadata declares an HTML file.
+The CLI publishes a 0600 temporary file through a directory-descriptor-rooted
+atomic no-overwrite rename on macOS and Linux. Unsupported filesystems fail
+closed. Failed-download cleanup preserves the primary error and adds a safe
+hint if temporary removal fails. Successful rename consumes the temporary name. It never uses an upstream filename as a
+local path. Downloaded bytes remain untrusted and are never executed.
+
+Existing apps require operator reauthorization for `files:read` and token
+reimport. Re-login changes credential generation: explicitly replace stale
+reads with `--reset-stale-policy` and rebuild writes, which the reset clears.
 
 ## Write boundary
 
@@ -185,3 +208,12 @@ while the successful environment setup does not expose the returned user
 token. The user-only variant therefore requires a fail-closed live human
 acceptance gate before release. This administrative surface is not available
 to the runtime Slack Skill.
+
+## Source release publication
+
+An annotated stable SemVer tag triggers the release workflow. It peels the tag,
+requires the commit to be in `main` with a successful main-push validation run,
+and builds the deterministic source bundle with the existing release tooling.
+The workflow uploads all three assets to a draft before publishing it. Failed
+uploads remove only that run's known draft; an ambiguous creation response
+requires inspection. Published releases and tags are never removed by cleanup.

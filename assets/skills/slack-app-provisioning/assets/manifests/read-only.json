@@ -17,6 +17,7 @@
       "bot": [
         "channels:history",
         "channels:read",
+        "files:read",
         "users:read"
       ]
     }

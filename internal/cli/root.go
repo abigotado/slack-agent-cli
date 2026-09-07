@@ -42,6 +42,12 @@ type UserAPI interface {
 	UserInfo(context.Context, slack.Token, string) (slack.User, error)
 }
 
+// FileAPI owns exact file metadata and bounded downloads.
+type FileAPI interface {
+	FileInfo(context.Context, slack.Token, string) (slack.FileDetails, error)
+	DownloadFile(context.Context, slack.Token, slack.FileDetails, string, io.Writer) (slack.DownloadResult, error)
+}
+
 // WriteAPI owns the sole one-attempt v1 remote mutation.
 type WriteAPI interface {
 	PostMessage(context.Context, slack.Token, slack.PostOptions) (slack.PostResult, error)
@@ -56,6 +62,7 @@ type Dependencies struct {
 	Conversations ConversationAPI
 	Messages      MessageAPI
 	Users         UserAPI
+	Files         FileAPI
 	Writes        WriteAPI
 	WriteState    *writestate.Tracker
 	Input         io.Reader
@@ -76,7 +83,7 @@ func DefaultDependencies() (Dependencies, error) {
 	client := slack.New()
 	return Dependencies{
 		Profiles: profiles, Policies: policies, Credentials: auth.KeychainStore{},
-		Auth: client, Conversations: client, Messages: client, Users: client, Writes: client,
+		Auth: client, Conversations: client, Messages: client, Users: client, Files: client, Writes: client,
 		WriteState: &writestate.Tracker{}, Input: os.Stdin, TokenTTY: auth.ReadTokenTTY, Output: output.New(),
 	}, nil
 }
@@ -123,6 +130,7 @@ func newRoot(dependencies Dependencies) *cobra.Command {
 		newConversationsCommand(dependencies),
 		newMessagesCommand(dependencies),
 		newUsersCommand(dependencies),
+		newFilesCommand(dependencies),
 		newSkillCommand(dependencies),
 	)
 	return root
