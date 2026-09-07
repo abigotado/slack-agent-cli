@@ -61,7 +61,7 @@ prebuilt executable or invoke `/usr/bin/security`.
 Go 1.25.14 or newer:
 
 ```sh
-go install github.com/abigotado/slack-agent-cli/cmd/slack-agent-cli@v0.2.3
+go install github.com/abigotado/slack-agent-cli/cmd/slack-agent-cli@v0.3.0
 slack-agent-cli version
 ```
 
@@ -85,9 +85,9 @@ For one operator's workspace, use one separate user-only Slack app/token and
 one named profile. The canonical `user-workspace-message-write` manifest has
 user scopes `channels:history`, `channels:read`, `groups:history`,
 `groups:read`, `im:history`, `im:read`, `mpim:history`, `mpim:read`,
-`users:read`, and `chat:write`. It acts as the authorizing user for exact
+`users:read`, `chat:write`, and `files:read`. It acts as the authorizing user for exact
 allowlisted public channels, private channels, one-to-one DMs, group DMs, and
-confirmed sends. It does not include a bot, search, files, reactions, admin,
+confirmed sends. It does not include a bot, search, reactions, admin,
 events, redirects, or `chat:write.public`.
 
 The runtime remains smaller than a general Slack connector: it cannot search
@@ -281,3 +281,34 @@ tools/release/test-source-bundle.sh
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before changing the machine, credential,
 transport, policy, or write-recovery boundary.
+
+## Read and download attachments
+
+History and thread results include a typed `files` array. Use its file ID and
+the containing message timestamp with an explicitly selected profile:
+
+```sh
+slack-agent-cli files get F123 --profile NAME \
+  --conversation-id C123 --message-ts 1234567890.123456
+slack-agent-cli files download F123 --profile NAME \
+  --conversation-id C123 --message-ts 1234567890.123456 \
+  --output /absolute/path/video.mp4
+```
+
+For an attachment in a reply, also pass `--thread-ts PARENT_TS`. The CLI
+verifies the exact message and read allowlist before looking up the file.
+Downloads support hosted files in the selected workspace, up to 250 MiB and
+two minutes. External files, redirects and remote-workspace downloads are
+unsupported. The parent directory must exist; an existing output path is never
+overwritten. Stdout remains JSON with the local path, byte count and SHA-256.
+Private URLs, tokens, previews and binary contents never enter stdout.
+
+Slack requires [`files:read`](https://docs.slack.dev/reference/scopes/files.read/)
+for file metadata and downloads. Updated provisioning manifests include it.
+For an existing installation, the operator must reauthorize/reinstall the app
+with that scope and reimport its token through `auth login`. This changes
+credential generation and invalidates existing policies. Review all read IDs,
+then run `auth allow-reads set --profile NAME --conversation-id ID...
+--reset-stale-policy --dry-run` and apply that exact set with `--yes`. The reset
+clears writes; rebuild approved write targets separately. A channel absent
+from the allowlist still needs explicit authorization.

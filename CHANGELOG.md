@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.0] - 2026-09-07
+
+- Add typed file attachment metadata to message history and thread results.
+- Add `files get` and `files download` with exact-message verification behind
+  the selected profile's read allowlist.
+- Stream hosted Slack files up to 250 MiB to new local files, with a two-minute
+  deadline, strict download-origin checks, no redirects, and SHA-256 output.
+- Add `files:read` to provisioning manifests and document reauthorization,
+  credential reimport, and explicit read/write policy migration.
+
 ## [0.2.3] - 2026-09-04
 
 - Add a canonical dedicated user-only Slack app variant for allowlisted,
@@ -51,3 +61,5 @@ All notable changes to this project are documented in this file.
 [0.2.1]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.1
 [0.2.2]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.2
 [0.2.3]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.3
+
+[0.3.0]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.3.0

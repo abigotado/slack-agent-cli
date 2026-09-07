@@ -6,6 +6,10 @@ import "time"
 const (
 	EnvelopeVersion = 1
 
+	MaxFileDownloadBytes       = 250 << 20
+	FileDownloadDeadline       = 2 * time.Minute
+	ProductionFileOrigin       = "https://files.slack.com"
+	FileDownloadPathPrefix     = "/files-pri/"
 	MaxTokenBytes              = 8 << 10
 	MaxMessageRunes            = 4_000
 	MaxMessageBytes            = 16 << 10
@@ -46,6 +50,7 @@ var allowedRoutes = [...]string{
 	"conversations.info",
 	"conversations.list",
 	"conversations.replies",
+	"files.info",
 	"users.info",
 }
 
@@ -54,6 +59,8 @@ func Routes() []string { return append([]string(nil), allowedRoutes[:]...) }
 
 // Limits is the machine-readable frozen v1 limits contract.
 type Limits struct {
+	FileDownloadBytes       int   `json:"file_download_bytes"`
+	FileDownloadDeadlineMS  int64 `json:"file_download_deadline_ms"`
 	TokenBytes              int   `json:"token_bytes"`
 	MessageRunes            int   `json:"message_runes"`
 	MessageBytes            int   `json:"message_bytes"`
@@ -88,6 +95,7 @@ type Limits struct {
 // V1Limits returns a value copy of the frozen v1 bounds.
 func V1Limits() Limits {
 	return Limits{
+		FileDownloadBytes: MaxFileDownloadBytes, FileDownloadDeadlineMS: FileDownloadDeadline.Milliseconds(),
 		TokenBytes: MaxTokenBytes, MessageRunes: MaxMessageRunes,
 		MessageBytes: MaxMessageBytes, RequestBodyBytes: MaxRequestBodyBytes,
 		CompressedResponseBytes: MaxCompressedResponseBytes,

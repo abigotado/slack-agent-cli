@@ -162,6 +162,9 @@ func (c *Client) History(ctx context.Context, token Token, options HistoryOption
 	if options.Cursor != "" {
 		values.Set("cursor", options.Cursor)
 	}
+	if options.Inclusive {
+		values.Set("inclusive", "true")
+	}
 	if options.Oldest != "" {
 		values.Set("oldest", options.Oldest)
 	}
@@ -186,6 +189,15 @@ func (c *Client) Replies(ctx context.Context, token Token, options ThreadOptions
 	values := url.Values{"channel": {options.ConversationID}, "ts": {options.ThreadTS}, "limit": {strconv.Itoa(options.Limit)}}
 	if options.Cursor != "" {
 		values.Set("cursor", options.Cursor)
+	}
+	if options.Oldest != "" {
+		values.Set("oldest", options.Oldest)
+	}
+	if options.Latest != "" {
+		values.Set("latest", options.Latest)
+	}
+	if options.Inclusive {
+		values.Set("inclusive", "true")
 	}
 	var response apiEnvelope
 	if err := c.call(ctx, token, http.MethodGet, "conversations.replies", values, &response, readOperation); err != nil {
@@ -446,7 +458,7 @@ func slackError(code string, class operationClass) error {
 	switch code {
 	case "invalid_auth", "account_inactive", "token_revoked", "not_authed":
 		return errx.New(errx.Auth, "SLACK_AUTH_REJECTED", "Slack rejected the credential", "login or rotate this profile")
-	case "channel_not_found", "user_not_found", "message_not_found", "thread_not_found":
+	case "channel_not_found", "user_not_found", "message_not_found", "thread_not_found", "file_not_found":
 		return errx.New(errx.NotFound, "SLACK_OBJECT_NOT_FOUND", "Slack object was not found or is not visible", "verify the exact ID and profile")
 	case "missing_scope", "not_allowed_token_type", "restricted_action", "access_denied":
 		return errx.New(errx.PermissionDenied, "SLACK_PERMISSION_DENIED", "Slack denied the operation", "request the required Slack scope or permission")

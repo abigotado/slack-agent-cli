@@ -70,7 +70,7 @@ func TestProvisioningSkillPinsCanonicalManifestsAndHooks(t *testing.T) {
 	if err := json.Unmarshal(files["assets/manifests/all-channels-message-write.json"], &manifest); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"channels:history", "channels:read", "chat:write", "groups:history", "groups:read", "users:read"}
+	want := []string{"channels:history", "channels:read", "chat:write", "files:read", "groups:history", "groups:read", "users:read"}
 	if !slices.Equal(manifest.OAuthConfig.Scopes.Bot, want) {
 		t.Fatalf("scopes=%v want=%v", manifest.OAuthConfig.Scopes.Bot, want)
 	}
@@ -87,7 +87,7 @@ func TestProvisioningSkillPinsCanonicalManifestsAndHooks(t *testing.T) {
 	if err := json.Unmarshal(files["assets/manifests/user-direct-message-read-only.json"], &userManifest); err != nil {
 		t.Fatal(err)
 	}
-	userScopes := []string{"im:history", "im:read", "users:read"}
+	userScopes := []string{"files:read", "im:history", "im:read", "users:read"}
 	if !slices.Equal(userManifest.OAuthConfig.Scopes.User, userScopes) {
 		t.Fatalf("user scopes=%v want=%v", userManifest.OAuthConfig.Scopes.User, userScopes)
 	}
@@ -107,7 +107,7 @@ func TestProvisioningSkillPinsCanonicalManifestsAndHooks(t *testing.T) {
 	if err := json.Unmarshal(files["assets/manifests/user-workspace-message-write.json"], &userWorkspaceManifest); err != nil {
 		t.Fatal(err)
 	}
-	wantUserWorkspaceScopes := []string{"channels:history", "channels:read", "chat:write", "groups:history", "groups:read", "im:history", "im:read", "mpim:history", "mpim:read", "users:read"}
+	wantUserWorkspaceScopes := []string{"channels:history", "channels:read", "chat:write", "files:read", "groups:history", "groups:read", "im:history", "im:read", "mpim:history", "mpim:read", "users:read"}
 	if !slices.Equal(userWorkspaceManifest.OAuthConfig.Scopes.User, wantUserWorkspaceScopes) {
 		t.Fatalf("user workspace scopes=%v want=%v", userWorkspaceManifest.OAuthConfig.Scopes.User, wantUserWorkspaceScopes)
 	}

@@ -9,6 +9,7 @@
   "oauth_config": {
     "scopes": {
       "user": [
+        "files:read",
         "im:history",
         "im:read",
         "users:read"

@@ -80,7 +80,16 @@ func validArchiveCommit(value string) bool {
 
 func newContractCommand(dependencies Dependencies) *cobra.Command {
 	return &cobra.Command{Use: "contract", Args: exactArgs(0), RunE: func(_ *cobra.Command, _ []string) error {
-		data := map[string]any{"envelope_version": contract.EnvelopeVersion, "exits": errx.Codes(), "limits": contract.V1Limits(), "slack_methods": contract.Routes()}
+		data := map[string]any{
+			"envelope_version": contract.EnvelopeVersion,
+			"exits":            errx.Codes(),
+			"limits":           contract.V1Limits(),
+			"slack_methods":    contract.Routes(),
+			"file_download": map[string]string{
+				"origin":      contract.ProductionFileOrigin,
+				"path_prefix": contract.FileDownloadPathPrefix,
+			},
+		}
 		return dependencies.Output.Success(data, nil)
 	}}
 }
