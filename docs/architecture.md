@@ -208,3 +208,12 @@ while the successful environment setup does not expose the returned user
 token. The user-only variant therefore requires a fail-closed live human
 acceptance gate before release. This administrative surface is not available
 to the runtime Slack Skill.
+
+## Source release publication
+
+An annotated stable SemVer tag triggers the release workflow. It peels the tag,
+requires the commit to be in `main` with a successful main-push validation run,
+and builds the deterministic source bundle with the existing release tooling.
+The workflow uploads all three assets to a draft before publishing it. Failed
+uploads remove only that run's known draft; an ambiguous creation response
+requires inspection. Published releases and tags are never removed by cleanup.

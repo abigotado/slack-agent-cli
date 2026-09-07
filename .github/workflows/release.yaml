@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify release commit and build source bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$GITHUB_REF_NAME
+          [[ $GITHUB_REF_TYPE == tag ]]
+          [[ $tag =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ $(git cat-file -t "refs/tags/$tag") == tag ]]
+          commit=$(git rev-parse "refs/tags/$tag^{commit}")
+          [[ $(git rev-parse HEAD) == "$commit" ]]
+          git merge-base --is-ancestor "$commit" origin/main
+          gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/go.yaml/runs" \
+            -f branch=main -f event=push -f head_sha="$commit" -f per_page=100 |
+            jq -e --arg commit "$commit" \
+              'any(.workflow_runs[]; .head_sha == $commit and .head_branch == "main" and .event == "push" and .status == "completed" and .conclusion == "success")' >/dev/null
+          tools/release/create-source-bundle.sh "$tag" "$commit" "$RUNNER_TEMP/bundle"
+          printf '%s' "$commit" > "$RUNNER_TEMP/release-commit"
+      - name: Publish verified source assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$GITHUB_REF_NAME
+          commit=$(cat "$RUNNER_TEMP/release-commit")
+          release_id=
+          cleanup() {
+            status=$?
+            trap - EXIT
+            if [[ $status -ne 0 && -n $release_id ]]; then
+              if gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" |
+                jq -e --arg tag "$tag" '.draft == true and .tag_name == $tag' >/dev/null; then
+                gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id" ||
+                  echo 'Draft cleanup failed; inspect the release before rerunning.' >&2
+              fi
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          # Duplicate creation fails without changing any existing release.
+          jq -n --arg tag "$tag" --arg commit "$commit" \
+            --rawfile body "docs/releases/$tag.md" \
+            '{tag_name:$tag,target_commitish:$commit,name:("slack-agent-cli " + $tag),body:$body,draft:true}' \
+            > "$RUNNER_TEMP/release-create.json"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+            --input "$RUNNER_TEMP/release-create.json" > "$RUNNER_TEMP/release-created.json"
+          release_id=$(jq -er '.id | numbers' "$RUNNER_TEMP/release-created.json")
+          # A lost creation response requires inspection, never speculative cleanup.
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" \
+            "$RUNNER_TEMP/bundle/slack-agent-cli-${tag#v}.tar.gz" \
+            "$RUNNER_TEMP/bundle/release-manifest.json" "$RUNNER_TEMP/bundle/SHA256SUMS"
+          jq -n '{draft:false,make_latest:"true"}' > "$RUNNER_TEMP/release-publish.json"
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            --input "$RUNNER_TEMP/release-publish.json" >/dev/null
