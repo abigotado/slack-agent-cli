@@ -312,3 +312,9 @@ then run `auth allow-reads set --profile NAME --conversation-id ID...
 --reset-stale-policy --dry-run` and apply that exact set with `--yes`. The reset
 clears writes; rebuild approved write targets separately. A channel absent
 from the allowlist still needs explicit authorization.
+
+Enterprise Grid E-owned file download paths are currently unsupported; the
+validated file path must belong to the selected T-workspace. Downloads use
+atomic no-overwrite rename on macOS/Linux and require filesystem support.
+Local write errors and unsupported response content are non-retryable; cleanup
+failures preserve the primary error and add a safe hint.

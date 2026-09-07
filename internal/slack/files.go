@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -64,12 +65,12 @@ func (c *Client) FileInfo(ctx context.Context, token Token, fileID string) (File
 }
 
 func fileDownloadURL(file FileDetails, workspaceID string) (*url.URL, error) {
-	denied := errx.New(errx.PermissionDenied, "FILE_DOWNLOAD_UNSUPPORTED", "file does not have a supported private Slack download", "use a hosted file in the selected workspace; external files and redirects are unsupported")
+	denied := errx.New(errx.PermissionDenied, "FILE_DOWNLOAD_UNSUPPORTED", "file does not have a supported private Slack download", "use a hosted file with the selected workspace owner; Enterprise Grid E-owned files, external files and redirects are unsupported")
 	if !validSlackID(workspaceID) || !strings.HasPrefix(workspaceID, "T") || !validSlackID(file.ID) || !strings.HasPrefix(file.ID, "F") || file.Mode != "hosted" || file.IsExternal {
 		return nil, denied
 	}
 	u, err := url.Parse(file.downloadURL)
-	if err != nil || u.Scheme != "https" || u.Host != "files.slack.com" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
+	if err != nil || u.Scheme+"://"+u.Host != contract.ProductionFileOrigin || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
 		return nil, denied
 	}
 	prefix := contract.FileDownloadPathPrefix + workspaceID + "-" + file.ID + "/"
@@ -105,42 +106,52 @@ func (c *Client) DownloadFile(ctx context.Context, token Token, file FileDetails
 	if err != nil {
 		return DownloadResult{}, errx.New(errx.Internal, "REQUEST_BUILD_FAILED", "failed to build file request", "report this defect")
 	}
-	request.Header.Set("Authorization", "Bearer "+string(token))
 	request.Header.Set("Accept-Encoding", "identity")
-	client := *c.httpClient
-	client.Timeout = contract.FileDownloadDeadline
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	response, err := client.Do(request)
+	response, err := c.do(ctx, token, request, downloadOperation)
 	if err != nil {
-		return DownloadResult{}, networkError(readOperation, errx.StageTransport, errors.New("file transport failed"))
+		return DownloadResult{}, err
 	}
-	defer func() { _ = response.Body.Close() }() // Read outcome is handled below; closing cannot change delivered bytes.
-	switch {
-	case response.StatusCode >= 300 && response.StatusCode < 400:
-		return DownloadResult{}, errx.New(errx.PermissionDenied, "FILE_REDIRECT_REJECTED", "file download redirect was rejected", "use a directly downloadable hosted Slack file")
-	case response.StatusCode == http.StatusTooManyRequests:
-		return DownloadResult{}, retryAfterError(response.Header.Get("Retry-After"), readOperation)
-	case response.StatusCode == http.StatusUnauthorized:
-		return DownloadResult{}, errx.New(errx.Auth, "SLACK_AUTH_REJECTED", "Slack rejected the credential", "login or rotate this profile")
-	case response.StatusCode == http.StatusForbidden:
-		return DownloadResult{}, errx.New(errx.PermissionDenied, "SLACK_PERMISSION_DENIED", "Slack denied the file download", "request files:read and access to the file")
-	case response.StatusCode == http.StatusNotFound:
-		return DownloadResult{}, errx.New(errx.NotFound, "SLACK_OBJECT_NOT_FOUND", "file was not found or is not visible", "verify the exact attachment")
-	case response.StatusCode != http.StatusOK:
-		return DownloadResult{}, networkError(readOperation, errx.StageHTTPResponse, errors.New("unexpected file HTTP status"))
-	}
-	encoding := response.Header.Get("Content-Encoding")
+	defer func() { _ = response.Body.Close() }() // Read outcome is handled below.
+	encoding := strings.ToLower(strings.TrimSpace(response.Header.Get("Content-Encoding")))
 	if (encoding != "" && encoding != "identity") || (response.ContentLength >= 0 && response.ContentLength != file.Size) {
-		return DownloadResult{}, errx.New(errx.Conflict, "FILE_CONTENT_CHANGED", "file size or encoding differs from its metadata", "re-read the exact file metadata")
+		return DownloadResult{}, unsupportedFileContent()
+	}
+	contentType, _, _ := mime.ParseMediaType(response.Header.Get("Content-Type")) // Missing/invalid types do not establish HTML permission.
+	expectedType, _, _ := mime.ParseMediaType(file.Mimetype)
+	if contentType == "text/html" && expectedType != "text/html" {
+		return DownloadResult{}, unsupportedFileContent()
 	}
 	digest := sha256.New()
 	// Read at most the declared size plus one; never buffer a video in memory.
-	count, err := io.Copy(io.MultiWriter(destination, digest), io.LimitReader(response.Body, file.Size+1))
+	sink := &downloadWriter{destination: destination}
+	count, err := io.Copy(io.MultiWriter(sink, digest), io.LimitReader(response.Body, file.Size+1))
+	if sink.failed {
+		return DownloadResult{}, errx.New(errx.Internal, "FILE_OUTPUT_FAILED", "cannot write download file", "check local storage and permissions before retrying")
+	}
 	if err != nil {
 		return DownloadResult{}, networkError(readOperation, errx.StageResponseBody, errors.New("file transfer failed"))
 	}
 	if count != file.Size {
-		return DownloadResult{}, errx.New(errx.Conflict, "FILE_CONTENT_CHANGED", "file size differs from its metadata", "re-read the exact file metadata")
+		return DownloadResult{}, unsupportedFileContent()
 	}
 	return DownloadResult{Bytes: count, SHA256: hex.EncodeToString(digest.Sum(nil))}, nil
+}
+
+// downloadWriter distinguishes destination failures, including short writes, from network reads.
+type downloadWriter struct {
+	destination io.Writer
+	failed      bool
+}
+
+func (w *downloadWriter) Write(p []byte) (int, error) {
+	n, err := w.destination.Write(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	w.failed = err != nil
+	return n, err
+}
+
+func unsupportedFileContent() error {
+	return errx.New(errx.Internal, "FILE_CONTENT_UNSUPPORTED", "Slack returned unsupported file content or metadata", "check file metadata and credential permissions; do not retry unchanged")
 }

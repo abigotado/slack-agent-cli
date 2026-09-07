@@ -2,10 +2,7 @@ package cli
 
 import (
 	"context"
-	"crypto/rand"
-	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -54,22 +51,15 @@ func newFileCommand(dependencies Dependencies, download bool) *cobra.Command {
 		if _, _, err := preflightTarget(command.Context(), dependencies, current, conversationID, policy.Read); err != nil {
 			return err
 		}
-		var page slack.MessagePage
-		if threadTS == "" {
-			page, err = dependencies.Messages.History(command.Context(), current.token, slack.HistoryOptions{ConversationID: conversationID, Oldest: messageTS, Latest: messageTS, Inclusive: true, Limit: 1})
-		} else {
-			page, err = dependencies.Messages.Replies(command.Context(), current.token, slack.ThreadOptions{ConversationID: conversationID, ThreadTS: threadTS, Oldest: messageTS, Latest: messageTS, Inclusive: true, Limit: 1})
-		}
+		message, err := readFileMessage(command.Context(), dependencies, current, conversationID, messageTS, threadTS)
 		if err != nil {
 			return err
 		}
 		attached := false
-		if len(page.Messages) == 1 && page.Messages[0].TS == messageTS && (threadTS == "" || page.Messages[0].ThreadTS == threadTS || messageTS == threadTS) {
-			for _, file := range page.Messages[0].Files {
-				if file.ID == args[0] {
-					attached = true
-					break
-				}
+		for _, file := range message.Files {
+			if file.ID == args[0] {
+				attached = true
+				break
 			}
 		}
 		if !attached {
@@ -78,9 +68,6 @@ func newFileCommand(dependencies Dependencies, download bool) *cobra.Command {
 		file, err := dependencies.Files.FileInfo(command.Context(), current.token, args[0])
 		if err != nil {
 			return err
-		}
-		if file.ID != args[0] {
-			return errx.New(errx.Internal, "FILE_IDENTITY_MISMATCH", "Slack returned a different file identity", "re-read the exact attachment")
 		}
 		meta := &output.Meta{Profile: name, WorkspaceID: current.profile.WorkspaceID, ContentTrust: "untrusted"}
 		if !download {
@@ -106,43 +93,48 @@ func newFileCommand(dependencies Dependencies, download bool) *cobra.Command {
 	return command
 }
 
-func saveDownload(ctx context.Context, dependencies Dependencies, current session, file slack.FileDetails, destination string) (result slack.DownloadResult, path string, resultErr error) {
-	path, err := filepath.Abs(destination)
-	if err != nil {
-		return result, "", usageError("INVALID_FILE_OUTPUT", "output path is invalid", err)
-	}
-	root, err := os.OpenRoot(filepath.Dir(path))
-	if err != nil {
-		return result, "", usageError("INVALID_FILE_OUTPUT", "output directory is unavailable", err)
-	}
-	defer func() { _ = root.Close() }() // Directory handle has no pending writes.
-	name := filepath.Base(path)
-	if _, err := root.Lstat(name); !errors.Is(err, os.ErrNotExist) {
-		return result, "", errx.New(errx.Conflict, "FILE_OUTPUT_EXISTS", "output path exists or cannot be inspected", "choose a new local output file")
-	}
-	temporary := ".slack-download-" + rand.Text()
-	target, err := root.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return result, "", errx.New(errx.Internal, "FILE_OUTPUT_FAILED", "cannot create download file", "check the local output directory")
-	}
-	defer func() {
-		_ = target.Close() // Explicit close below handles success; on failure cleanup owns the partial file.
-		if err := root.Remove(temporary); err != nil {
-			resultErr = errx.New(errx.Conflict, "FILE_CLEANUP_FAILED", "download temporary file cleanup failed", "inspect the output directory before retrying")
+// readFileMessage permits a leading parent without treating it as attachment proof.
+// The exact timestamp window and fixed page budget prevent an unbounded thread scan.
+func readFileMessage(ctx context.Context, dependencies Dependencies, current session, conversationID, messageTS, threadTS string) (slack.Message, error) {
+	notFound := errx.New(errx.NotFound, "FILE_NOT_IN_MESSAGE", "file message was not found exactly", "verify the conversation and message IDs; provide --thread-ts for a reply")
+	if threadTS == "" {
+		page, err := dependencies.Messages.History(ctx, current.token, slack.HistoryOptions{ConversationID: conversationID, Oldest: messageTS, Latest: messageTS, Inclusive: true, Limit: 1})
+		if err != nil {
+			return slack.Message{}, err
 		}
-	}()
-	result, err = dependencies.Files.DownloadFile(ctx, current.token, file, current.profile.WorkspaceID, target)
-	if err != nil {
-		return result, "", err
+		if len(page.Messages) != 1 || page.Messages[0].TS != messageTS {
+			return slack.Message{}, notFound
+		}
+		return page.Messages[0], nil
 	}
-	if err := target.Sync(); err != nil {
-		return result, "", errx.New(errx.Internal, "FILE_OUTPUT_FAILED", "cannot sync download file", "check local storage")
+	cursor := ""
+	for pageNumber := 0; pageNumber < 2; pageNumber++ {
+		page, err := dependencies.Messages.Replies(ctx, current.token, slack.ThreadOptions{ConversationID: conversationID, ThreadTS: threadTS, Oldest: messageTS, Latest: messageTS, Inclusive: true, Limit: 2, Cursor: cursor})
+		if err != nil {
+			return slack.Message{}, err
+		}
+		if len(page.Messages) > 2 {
+			return slack.Message{}, notFound
+		}
+		var match *slack.Message
+		for i := range page.Messages {
+			message := &page.Messages[i]
+			if message.TS == messageTS {
+				if match != nil || (message.ThreadTS != threadTS && !(messageTS == threadTS && message.ThreadTS == "")) {
+					return slack.Message{}, notFound
+				}
+				match = message
+			} else if message.TS != threadTS || (message.ThreadTS != "" && message.ThreadTS != threadTS) {
+				return slack.Message{}, notFound
+			}
+		}
+		if match != nil {
+			return *match, nil
+		}
+		if page.NextCursor == "" || page.NextCursor == cursor {
+			break
+		}
+		cursor = page.NextCursor
 	}
-	if err := target.Close(); err != nil {
-		return result, "", errx.New(errx.Internal, "FILE_OUTPUT_FAILED", "cannot close download file", "check local storage")
-	}
-	if err := root.Link(temporary, name); err != nil {
-		return result, "", errx.New(errx.Conflict, "FILE_OUTPUT_NOT_PUBLISHED", "download could not be published without overwriting", "inspect the output path and choose a new file")
-	}
-	return result, path, nil
+	return slack.Message{}, notFound
 }

@@ -10,9 +10,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abigotado/slack-agent-cli/internal/contract"
 	"github.com/abigotado/slack-agent-cli/internal/errx"
+	"github.com/abigotado/slack-agent-cli/internal/output"
 )
 
 func TestFileInfoProjectionAndExactIdentity(t *testing.T) {
@@ -59,15 +61,16 @@ func TestDownloadURLBoundary(t *testing.T) {
 		"https://files.slack.com/files-pri/T1-F1/a?token=secret", "https://files.slack.com/files-pri/T1-F1/a#x",
 		"https://files.slack.com/files-pri/T1-F1/../a", "https://files.slack.com/files-pri/T1-F1/%2e%2e/a",
 		"https://files.slack.com/files-pri/T1-F1/%2fa/../../a", "https://files.slack.com/files-pri/T1-F1/a%5cb",
-		"https://files.slack.com/files-pri/T1-F1/",
+		"https://files.slack.com/files-pri/T1-F1/", "https://files.slack.com/files-pri/E1-F1/a",
 	} {
 		t.Run(endpoint, func(t *testing.T) {
 			calls := 0
 			c := &Client{httpClient: &http.Client{Transport: fileTransport(func(*http.Request) (*http.Response, error) { calls++; return nil, errors.New("unexpected") })}}
 			_, err := c.DownloadFile(context.Background(), "sentinel", FileDetails{File: File{ID: "F1", Mode: "hosted"}, downloadURL: endpoint}, "T1", io.Discard)
-			if err == nil || calls != 0 || strings.Contains(err.Error(), endpoint) || strings.Contains(err.Error(), "sentinel") {
+			if err == nil || calls != 0 {
 				t.Fatalf("URL boundary failed: calls %d err %v", calls, err)
 			}
+			assertFileErrorRedacted(t, err, endpoint, "sentinel")
 		})
 	}
 }
@@ -89,10 +92,10 @@ func TestDownloadResponseBoundaries(t *testing.T) {
 		{"auth", 401, "", 0, 3, "", errx.Auth},
 		{"missing", 404, "", 0, 3, "", errx.NotFound},
 		{"server", 503, "", 0, 3, "", errx.Retryable},
-		{"short", 200, "ab", -1, 3, "", errx.Conflict},
-		{"long", 200, "abcde", -1, 3, "", errx.Conflict},
-		{"declared mismatch", 200, "abc", 4, 3, "", errx.Conflict},
-		{"encoded", 200, "abc", 3, 3, "gzip", errx.Conflict},
+		{"short", 200, "ab", -1, 3, "", errx.Internal},
+		{"long", 200, "abcde", -1, 3, "", errx.Internal},
+		{"declared mismatch", 200, "abc", 4, 3, "", errx.Internal},
+		{"encoded", 200, "abc", 3, 3, "gzip", errx.Internal},
 		{"too large", 200, "", 0, contract.MaxFileDownloadBytes + 1, "", errx.Usage},
 	}
 	for _, tt := range tests {
@@ -191,12 +194,92 @@ func TestDownloadFailureRedactionAndCancellation(t *testing.T) {
 				target = failedFileWriter{}
 			}
 			_, err := c.DownloadFile(ctx, "sentinel", file, "T1", target)
-			if err == nil || strings.Contains(err.Error(), "sentinel") || strings.Contains(err.Error(), "private.example") || strings.Contains(err.Error(), "filesystem") || calls > 1 {
+			if err == nil || calls > 1 {
 				t.Fatalf("bad failure %v", err)
+			}
+			assertFileErrorRedacted(t, err, "sentinel", "private.example", "private filesystem failure")
+			switch scenario {
+			case "writer":
+				if errx.As(err).Code != "FILE_OUTPUT_FAILED" || errx.ExitCode(err) != errx.Internal {
+					t.Fatalf("sink failure was retryable: %v", err)
+				}
+			case "cancelled":
+				if calls != 0 || errx.As(err).Stage != errx.StagePreDispatch {
+					t.Fatal("cancelled download dispatched or misclassified")
+				}
 			}
 			if scenario == "external" && calls != 0 {
 				t.Fatal("external file dispatched")
 			}
 		})
+	}
+}
+
+func assertFileErrorRedacted(t *testing.T, err error, sentinels ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		for _, sentinel := range sentinels {
+			if strings.Contains(current.Error(), sentinel) {
+				t.Fatal("sensitive value in error chain")
+			}
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	writer := &output.Writer{Out: &stdout, Err: &stderr}
+	writer.Failure(err)
+	for _, sentinel := range sentinels {
+		if strings.Contains(stdout.String()+stderr.String(), sentinel) {
+			t.Fatal("sensitive value in serialized failure")
+		}
+	}
+}
+
+func TestDownloadRejectsUnexpectedContent(t *testing.T) {
+	for _, test := range []struct {
+		name, actualType, expectedType, encoding string
+		allowed                                  bool
+	}{
+		{"HTML login", "text/html; charset=UTF-8", "video/mp4", "", false},
+		{"HTML without metadata", "text/html", "", "", false},
+		{"HTML attachment", "text/html", "text/html; charset=UTF-8", "", true},
+		{"binary fallback", "application/octet-stream", "video/mp4", "", true},
+		{"normalized encoding", "video/mp4", "video/mp4", " Identity ", true},
+		{"unsupported compression", "video/mp4", "video/mp4", "gzip", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c := &Client{httpClient: &http.Client{Timeout: contract.NetworkDeadline, Transport: fileTransport(func(r *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {test.actualType}, "Content-Encoding": {test.encoding}}, Body: io.NopCloser(strings.NewReader("abc")), ContentLength: 3, Request: r}, nil
+			})}}
+			var out bytes.Buffer
+			_, err := c.DownloadFile(context.Background(), "sentinel", FileDetails{File: File{ID: "F1", Mode: "hosted", Size: 3, Mimetype: test.expectedType}, downloadURL: contract.ProductionFileOrigin + "/files-pri/T1-F1/a"}, "T1", &out)
+			if test.allowed {
+				if err != nil || out.String() != "abc" {
+					t.Fatalf("valid content rejected: %v", err)
+				}
+			} else if err == nil || errx.As(err).Code != "FILE_CONTENT_UNSUPPORTED" || errx.ExitCode(err) != errx.Internal || out.Len() != 0 {
+				t.Fatalf("invalid content accepted/misclassified: %v", err)
+			}
+		})
+	}
+}
+
+func TestDownloadHasOwnDeadline(t *testing.T) {
+	c := &Client{httpClient: &http.Client{Timeout: contract.NetworkDeadline, Transport: fileTransport(func(r *http.Request) (*http.Response, error) {
+		deadline, ok := r.Context().Deadline()
+		remaining := time.Until(deadline)
+		if !ok || remaining < 110*time.Second || remaining > 120*time.Second {
+			t.Fatalf("download clamped by API timeout: %s", remaining)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), ContentLength: 0, Request: r}, nil
+	})}}
+	_, err := c.DownloadFile(context.Background(), "sentinel", FileDetails{File: File{ID: "F1", Mode: "hosted"}, downloadURL: contract.ProductionFileOrigin + "/files-pri/T1-F1/a"}, "T1", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.httpClient.Timeout != contract.NetworkDeadline {
+		t.Fatal("download mutated shared API timeout")
 	}
 }

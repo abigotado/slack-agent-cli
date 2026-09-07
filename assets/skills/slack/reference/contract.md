@@ -52,6 +52,10 @@ may read one extra byte solely to detect overflow; failed partials are removed.
 
 `FILE_NOT_IN_MESSAGE` is exit 3; `FILE_DOWNLOAD_UNSUPPORTED` and
 `FILE_REDIRECT_REJECTED` are exit 8; `FILE_TOO_LARGE` is exit 2.
-`FILE_CONTENT_CHANGED`, `FILE_OUTPUT_EXISTS`, `FILE_OUTPUT_NOT_PUBLISHED` and
-`FILE_CLEANUP_FAILED` are exit 9. Inspect local output before retrying a
-publication/cleanup failure: a complete file may already exist.
+`FILE_OUTPUT_EXISTS` is exit 9. `FILE_OUTPUT_FAILED` and
+`FILE_CONTENT_UNSUPPORTED` are exit 1; do not retry unchanged. The latter
+covers size mismatch, unsupported encoding, and HTML for non-HTML metadata.
+Atomic no-overwrite rename publishes complete files. If temporary cleanup
+fails, the primary error code/exit is preserved with a cleanup warning hint.
+Enterprise Grid E-owned file paths are unsupported; only the selected
+T-workspace prefix is accepted.

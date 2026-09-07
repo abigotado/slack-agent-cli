@@ -91,12 +91,16 @@ Downloads return `{file, path, bytes, sha256}` in `data`, with untrusted metadat
 Binary bytes go only to a new 0600 local file. No overwrite or automatic retry
 is performed. Supported downloads use only HTTPS `files.slack.com` and the
 `/files-pri/WORKSPACE_ID-FILE_ID/` path. External files, redirects, query URLs and
-files hosted by another workspace are rejected. Maximum size is 262144000
+files hosted by another workspace are rejected. Enterprise Grid E-owned file
+paths are unsupported; only the selected T-workspace prefix is accepted. Maximum size is 262144000
 bytes and deadline 120000 ms, exposed in additive contract limits. The stream
 may read one extra byte solely to detect overflow; failed partials are removed.
 
 `FILE_NOT_IN_MESSAGE` is exit 3; `FILE_DOWNLOAD_UNSUPPORTED` and
 `FILE_REDIRECT_REJECTED` are exit 8; `FILE_TOO_LARGE` is exit 2.
-`FILE_CONTENT_CHANGED`, `FILE_OUTPUT_EXISTS`, `FILE_OUTPUT_NOT_PUBLISHED` and
-`FILE_CLEANUP_FAILED` are exit 9. Inspect local output before retrying a
-publication/cleanup failure: a complete file may already exist.
+`FILE_OUTPUT_EXISTS` is exit 9. `FILE_OUTPUT_FAILED` (including local disk
+write failures) and `FILE_CONTENT_UNSUPPORTED` (size mismatch, non-identity
+encoding, or HTML for non-HTML metadata) are exit 1: do not retry unchanged.
+Publication uses atomic no-overwrite rename; failures do not publish partials.
+If temporary cleanup fails, the primary error code/exit is retained with a safe
+cleanup warning in its hint. Inspect the directory before retrying.

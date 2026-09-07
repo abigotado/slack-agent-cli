@@ -17,21 +17,25 @@ import (
 )
 
 type fakeFiles struct {
-	calls   []string
-	fail    bool
-	wrongID bool
+	calls       []string
+	fail        bool
+	downloadErr error
+	onDownload  func(io.Writer)
 }
 
 func (f *fakeFiles) FileInfo(context.Context, slack.Token, string) (slack.FileDetails, error) {
 	f.calls = append(f.calls, "info")
 	id := "F1"
-	if f.wrongID {
-		id = "F2"
-	}
 	return slack.FileDetails{File: slack.File{ID: id, Name: "../../untrusted.mp4", Size: 3, Mode: "hosted"}}, nil
 }
 func (f *fakeFiles) DownloadFile(_ context.Context, _ slack.Token, _ slack.FileDetails, workspace string, w io.Writer) (slack.DownloadResult, error) {
 	f.calls = append(f.calls, "download")
+	if f.onDownload != nil {
+		f.onDownload(w)
+	}
+	if f.downloadErr != nil {
+		return slack.DownloadResult{}, f.downloadErr
+	}
 	if workspace != "T1" {
 		return slack.DownloadResult{}, errors.New("wrong workspace")
 	}
@@ -45,7 +49,7 @@ func (f *fakeFiles) DownloadFile(_ context.Context, _ slack.Token, _ slack.FileD
 }
 
 func TestFilesEnforceAttachmentAndPolicyBeforeInfo(t *testing.T) {
-	for _, scenario := range []string{"success", "thread", "missing profile", "blocked", "stale", "shared drift", "wrong message", "wrong file", "wrong info", "wrong thread"} {
+	for _, scenario := range []string{"success", "thread", "missing profile", "blocked", "stale", "shared drift", "wrong message", "wrong file", "wrong thread"} {
 		t.Run(scenario, func(t *testing.T) {
 			d, store, api, out := newTestDependencies(t)
 			p := seedSession(t, d, store, []profile.Capability{profile.CapabilityRead})
@@ -86,9 +90,6 @@ func TestFilesEnforceAttachmentAndPolicyBeforeInfo(t *testing.T) {
 			case "wrong file":
 				api.messages.Messages[0].Files[0].ID = "F2"
 				want = errx.NotFound
-			case "wrong info":
-				f.wrongID = true
-				want = errx.Internal
 			case "wrong thread":
 				args = append(args, "--thread-ts", "1.0")
 				api.messages.Messages[0].ThreadTS = "3.0"
@@ -97,7 +98,7 @@ func TestFilesEnforceAttachmentAndPolicyBeforeInfo(t *testing.T) {
 			if got := Run(context.Background(), args, d); got != want {
 				t.Fatalf("exit %d want %d: %s", got, want, out)
 			}
-			if want != errx.OK && scenario != "wrong info" && len(f.calls) != 0 {
+			if want != errx.OK && len(f.calls) != 0 {
 				t.Fatalf("file API called before proof: %v", f.calls)
 			}
 			if want == errx.OK {
@@ -202,5 +203,139 @@ func TestDownloadCommandReturnsArtifactEnvelope(t *testing.T) {
 	content, err := os.ReadFile(dest)
 	if err != nil || string(content) != "abc" {
 		t.Fatal("missing artifact")
+	}
+}
+
+func TestFileThreadProofIsExactAndBounded(t *testing.T) {
+	parent := slack.Message{TS: "1.0", Files: []slack.File{{ID: "F1"}}}
+	reply := slack.Message{TS: "2.0", ThreadTS: "1.0"}
+	for _, tt := range []struct {
+		name  string
+		pages []slack.MessagePage
+		ok    bool
+		calls int
+	}{
+		{"leading parent", []slack.MessagePage{{Messages: []slack.Message{parent, reply}}}, true, 1},
+		{"next page", []slack.MessagePage{{Messages: []slack.Message{parent}, NextCursor: "next"}, {Messages: []slack.Message{reply}}}, true, 2},
+		{"parent is not proof", []slack.MessagePage{{Messages: []slack.Message{parent}}}, false, 1},
+		{"duplicate", []slack.MessagePage{{Messages: []slack.Message{reply, reply}}}, false, 1},
+		{"wrong thread", []slack.MessagePage{{Messages: []slack.Message{{TS: "2.0", ThreadTS: "3.0"}}}}, false, 1},
+		{"repeated cursor", []slack.MessagePage{{NextCursor: "next"}, {NextCursor: "next"}}, false, 2},
+		{"page budget", []slack.MessagePage{{NextCursor: "next"}, {NextCursor: "last"}, {Messages: []slack.Message{reply}}}, false, 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d, _, api, _ := newTestDependencies(t)
+			api.replyPages = tt.pages
+			message, err := readFileMessage(context.Background(), d, session{}, "C1", "2.0", "1.0")
+			if (err == nil) != tt.ok || (tt.ok && message.TS != "2.0") {
+				t.Fatalf("message=%+v err=%v", message, err)
+			}
+			if len(api.replyOptions) != tt.calls {
+				t.Fatalf("calls=%d", len(api.replyOptions))
+			}
+			for i, o := range api.replyOptions {
+				if o.Limit != 2 || !o.Inclusive || o.Oldest != "2.0" || o.Latest != "2.0" || o.ThreadTS != "1.0" || o.ConversationID != "C1" || (i == 1 && o.Cursor != "next") {
+					t.Fatalf("unbounded query: %+v", o)
+				}
+			}
+		})
+	}
+}
+
+type failingDownloadDirectory struct {
+	rootedDownloadDirectory
+	publishErr, removeErr error
+	removes               int
+}
+
+func (d *failingDownloadDirectory) Publish(source, destination string) error {
+	if d.publishErr != nil {
+		return d.publishErr
+	}
+	return d.rootedDownloadDirectory.Publish(source, destination)
+}
+func (d *failingDownloadDirectory) Remove(name string) error {
+	d.removes++
+	if d.removeErr != nil {
+		return d.removeErr
+	}
+	return d.rootedDownloadDirectory.Remove(name)
+}
+
+func TestDownloadPublicationAndCleanupFailures(t *testing.T) {
+	for _, scenario := range []string{"cleanup preserves auth", "publication unsupported", "destination race", "success consumes temporary"} {
+		t.Run(scenario, func(t *testing.T) {
+			d, store, _, _ := newTestDependencies(t)
+			p := seedSession(t, d, store, []profile.Capability{profile.CapabilityRead})
+			path := t.TempDir()
+			root, err := os.OpenRoot(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			dir := &failingDownloadDirectory{rootedDownloadDirectory: rootedDownloadDirectory{root}}
+			f := &fakeFiles{}
+			d.Files = f
+			wantCode := ""
+			switch scenario {
+			case "cleanup preserves auth":
+				f.downloadErr = errx.New(errx.Auth, "TOKEN_REJECTED", "rejected", "reauthorize")
+				dir.removeErr = errors.New("private-path-sentinel")
+				wantCode = "TOKEN_REJECTED"
+			case "publication unsupported":
+				dir.publishErr = errors.ErrUnsupported
+				wantCode = "FILE_OUTPUT_FAILED"
+			case "destination race":
+				f.onDownload = func(io.Writer) {
+					if err := os.WriteFile(filepath.Join(path, "video"), []byte("original"), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				wantCode = "FILE_OUTPUT_EXISTS"
+			case "success consumes temporary":
+				dir.removeErr = errors.New("must not remove after rename")
+			}
+			_, err = writeDownload(context.Background(), d, session{profile: p}, slack.FileDetails{}, dir, "video")
+			if wantCode == "" {
+				if err != nil || dir.removes != 0 {
+					t.Fatalf("success: err=%v removes=%d", err, dir.removes)
+				}
+			} else {
+				if err == nil || errx.As(err).Code != wantCode {
+					t.Fatalf("err=%v want=%s", err, wantCode)
+				}
+				if scenario == "cleanup preserves auth" && (errx.As(err).Exit != errx.Auth || !strings.Contains(errx.As(err).Hint, "cleanup also failed") || strings.Contains(err.Error(), "private-path-sentinel")) {
+					t.Fatalf("primary error lost: %+v", err)
+				}
+				if scenario == "destination race" {
+					data, e := os.ReadFile(filepath.Join(path, "video"))
+					if e != nil || string(data) != "original" {
+						t.Fatal("overwrote racing destination")
+					}
+				}
+			}
+			entries, err := os.ReadDir(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), ".slack-download-") && scenario != "cleanup preserves auth" {
+					t.Fatal("temporary file leaked")
+				}
+			}
+		})
+	}
+}
+
+func TestContractExposesFileBoundary(t *testing.T) {
+	d, _, _, out := newTestDependencies(t)
+	if exit := Run(context.Background(), []string{"contract"}, d); exit != errx.OK {
+		t.Fatal(exit)
+	}
+	data := decodeEnvelope(t, out)["data"].(map[string]any)
+	limits := data["limits"].(map[string]any)
+	download := data["file_download"].(map[string]any)
+	if limits["file_download_bytes"] != float64(262144000) || limits["file_download_deadline_ms"] != float64(120000) || download["origin"] != "https://files.slack.com" || download["path_prefix"] != "/files-pri/" {
+		t.Fatalf("contract drift: %v", data)
 	}
 }

@@ -144,17 +144,22 @@ previews are untrusted. Content-bearing envelopes include
 `meta.content_trust: "untrusted"`. File attachment metadata is projected into history and thread messages.
 `files get` and `files download` require a read-policy preflight and an exact
 message read proving the file ID before calling `files.info`. Reply attachments
-require their parent thread timestamp. Private URLs remain inside the transport.
+require their parent thread timestamp. The exact inclusive timestamp window
+uses at most two pages of two messages and tolerates a leading parent without
+treating it as proof of attachment. Private URLs remain inside the transport.
 
 The additional download route is fixed to HTTPS `files.slack.com`, with a
 `/files-pri/WORKSPACE_ID-FILE_ID/` path bound to the selected workspace and
 verified file. Only hosted, non-external files are supported; remote-workspace
-Slack Connect downloads, query URLs, redirects, and arbitrary origins are
+Slack Connect downloads, Enterprise Grid E-owned file paths, query URLs, redirects, and arbitrary origins are
 rejected. The download streams at most the declared size plus one byte, up to
 250 MiB plus one overflow-detection byte, within two minutes, checks the exact
-size, and returns a SHA-256 digest. It accepts only identity encoding. The CLI
-publishes a 0600 temporary file through a directory-rooted no-overwrite hard
-link and removes the temporary name. It never uses an upstream filename as a
+size, and returns a SHA-256 digest. It accepts only identity encoding (case
+insensitive), rejecting HTML responses unless metadata declares an HTML file.
+The CLI publishes a 0600 temporary file through a directory-descriptor-rooted
+atomic no-overwrite rename on macOS and Linux. Unsupported filesystems fail
+closed. Failed-download cleanup preserves the primary error and adds a safe
+hint if temporary removal fails. Successful rename consumes the temporary name. It never uses an upstream filename as a
 local path. Downloaded bytes remain untrusted and are never executed.
 
 Existing apps require operator reauthorization for `files:read` and token
