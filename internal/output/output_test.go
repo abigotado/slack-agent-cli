@@ -69,7 +69,7 @@ func TestFailureIncludesFixedDiagnosticStage(t *testing.T) {
 	var stdout bytes.Buffer
 	writer := &Writer{Out: &stdout, Err: &bytes.Buffer{}}
 	failure := errx.New(errx.Retryable, "SLACK_READ_FAILED", "Slack read failed safely", "retry the bounded read with backoff").WithStage(errx.StageTransport).Wrap(errors.New(secret))
-	if exit := writer.Failure(failure); exit != errx.Retryable {
+	if exit := writer.Failure(failure); exit != errx.Internal {
 		t.Fatalf("exit %d", exit)
 	}
 	var envelope Envelope
@@ -117,5 +117,53 @@ func TestConfirmedWriteOutputFailureUsesExactMarker(t *testing.T) {
 	}
 	if stderr.String() != "SLACK_AGENT_CLI_CONFIRMED_WRITE_OUTPUT_FAILURE\n" {
 		t.Fatalf("marker %q", stderr.String())
+	}
+}
+
+func TestEveryFailureHasNonzeroProcessStatusWithoutChangingEnvelope(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		exit errx.Exit
+		code string
+		want errx.Exit
+	}{
+		{"accidental success", errx.OK, "BAD", errx.Internal},
+		{"invalid negative", errx.Exit(-1), "BAD", errx.Internal},
+		{"invalid positive", errx.Exit(256), "BAD", errx.Internal},
+		{"internal", errx.Internal, "INTERNAL", errx.Internal},
+		{"input", errx.Usage, "INVALID_LIMIT", errx.Usage},
+		{"local missing", errx.NotFound, "PROFILE_NOT_FOUND", errx.NotFound},
+		{"ambiguous", errx.Ambiguous, "AMBIGUOUS", errx.Ambiguous},
+		{"auth", errx.Auth, "CREDENTIAL_NOT_FOUND", errx.Internal},
+		{"retryable", errx.Retryable, "SLACK_READ_FAILED", errx.Internal},
+		{"approval", errx.ConfirmationRequired, "MESSAGE_CONFIRMATION_REQUIRED", errx.ConfirmationRequired},
+		{"policy", errx.PermissionDenied, "TARGET_NOT_ALLOWLISTED", errx.PermissionDenied},
+		{"Slack Connect policy", errx.PermissionDenied, "SLACK_CONNECT_OPT_IN_REQUIRED", errx.PermissionDenied},
+		{"remote missing", errx.NotFound, "SLACK_OBJECT_NOT_FOUND", errx.Internal},
+		{"remote write target", errx.NotFound, "SLACK_WRITE_TARGET_UNAVAILABLE", errx.Internal},
+		{"remote permission", errx.PermissionDenied, "SLACK_PERMISSION_DENIED", errx.Internal},
+		{"remote write permission", errx.PermissionDenied, "SLACK_WRITE_PERMISSION_DENIED", errx.Internal},
+		{"remote write input", errx.Usage, "SLACK_WRITE_REJECTED", errx.Internal},
+		{"remote file redirect", errx.PermissionDenied, "FILE_REDIRECT_REJECTED", errx.Internal},
+		{"unsupported local file", errx.PermissionDenied, "FILE_DOWNLOAD_UNSUPPORTED", errx.PermissionDenied},
+		{"conflict", errx.Conflict, "POLICY_BINDING_STALE", errx.Conflict},
+		{"unknown write", errx.Conflict, "WRITE_OUTCOME_UNKNOWN", errx.Conflict},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			writer := &Writer{Out: &stdout, Err: &stderr}
+			failure := errx.New(test.exit, test.code, "safe message", "safe hint").Wrap(errors.New("credential-sentinel"))
+			if exit := writer.Failure(failure); exit != test.want || exit == errx.OK {
+				t.Fatalf("exit=%d want=%d", exit, test.want)
+			}
+			want := `{"ok":false,"v":1,"error":{"code":"` + test.code + `","message":"safe message"},"hint":"safe hint"}` + "\n"
+			if stdout.String() != want || stderr.Len() != 0 {
+				t.Fatalf("envelope changed: stdout=%q stderr=%q", stdout.String(), stderr.String())
+			}
+			if errx.ExitCode(failure) != test.exit {
+				t.Fatal("process mapping changed internal recovery category")
+			}
+		})
 	}
 }

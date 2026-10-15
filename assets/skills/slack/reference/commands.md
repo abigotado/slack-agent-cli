@@ -20,12 +20,12 @@ slack-agent-cli auth allow-writes set --profile NAME \
 slack-agent-cli auth allow-writes clear --profile NAME --dry-run|--yes
 
 slack-agent-cli me --profile NAME
-slack-agent-cli conversations list --profile NAME --types TYPES --limit N [--cursor CURSOR]
+slack-agent-cli conversations list --profile NAME --types TYPES [--limit N] [--cursor CURSOR]
 slack-agent-cli conversations get CONVERSATION_ID --profile NAME
-slack-agent-cli messages history --profile NAME --conversation-id ID --limit N \
+slack-agent-cli messages history --profile NAME --conversation-id ID [--limit N] \
   [--cursor CURSOR] [--oldest TS] [--latest TS]
 slack-agent-cli messages thread --profile NAME --conversation-id ID \
-  --thread-ts TS --limit N [--cursor CURSOR]
+  --thread-ts TS [--limit N] [--cursor CURSOR]
 slack-agent-cli users get USER_ID --profile NAME
 slack-agent-cli files get FILE_ID --profile NAME --conversation-id ID \
   --message-ts TS [--thread-ts PARENT_TS]
@@ -45,3 +45,5 @@ and install only the supplied exact read IDs. Rebuild writes afterwards.
 
 The Skill must never call a command named `api`, `request`, or `raw`; these are
 not part of the binary contract.
+
+Paginated reads default to `--limit 50`; explicit values must be 1-100.

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/abigotado/slack-agent-cli/internal/errx"
+	"github.com/abigotado/slack-agent-cli/internal/output"
 )
 
 func fixtureBotToken() string { return "xox" + "b-super-secret" }
@@ -75,6 +76,14 @@ func TestSlackFailuresAreBoundedAndRedacted(t *testing.T) {
 			typed := errx.As(err)
 			if typed.Exit != test.exit {
 				t.Fatalf("exit %d want %d", typed.Exit, test.exit)
+			}
+			var stdout bytes.Buffer
+			writer := &output.Writer{Out: &stdout, Err: &bytes.Buffer{}}
+			if exit := writer.Failure(err); exit != errx.Internal {
+				t.Fatalf("process exit=%d want=1 output=%s", exit, &stdout)
+			}
+			if !strings.Contains(stdout.String(), `"ok":false`) || strings.Contains(stdout.String(), sentinel) {
+				t.Fatalf("unsafe failure envelope: %s", &stdout)
 			}
 			if strings.Contains(err.Error(), sentinel) || strings.Contains(typed.Message, sentinel) {
 				t.Fatal("secret leaked")

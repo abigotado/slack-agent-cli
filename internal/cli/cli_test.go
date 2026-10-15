@@ -40,6 +40,8 @@ func (s *fakeStore) Save(_ context.Context, name string, value auth.Credential) 
 func (s *fakeStore) Delete(_ context.Context, name string) error { delete(s.values, name); return nil }
 
 type fakeSlack struct {
+	listOptions    []slack.ListOptions
+	authErr        error
 	historyOptions []slack.HistoryOptions
 	replyOptions   []slack.ThreadOptions
 	replyPages     []slack.MessagePage
@@ -54,9 +56,10 @@ type fakeSlack struct {
 
 func (s *fakeSlack) AuthTest(context.Context, slack.Token) (slack.Identity, error) {
 	s.calls = append(s.calls, "auth.test")
-	return s.identity, nil
+	return s.identity, s.authErr
 }
-func (s *fakeSlack) ConversationsList(context.Context, slack.Token, slack.ListOptions) (slack.ConversationPage, error) {
+func (s *fakeSlack) ConversationsList(_ context.Context, _ slack.Token, options slack.ListOptions) (slack.ConversationPage, error) {
+	s.listOptions = append(s.listOptions, options)
 	s.calls = append(s.calls, "conversations.list")
 	return slack.ConversationPage{Conversations: []slack.ConversationSummary{{ID: s.conversation.ID, Name: s.conversation.Name}}}, nil
 }

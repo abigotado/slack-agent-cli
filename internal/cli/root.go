@@ -115,6 +115,14 @@ func newRoot(dependencies Dependencies) *cobra.Command {
 		Args:          exactArgs(0),
 		RunE:          subcommandRequired,
 	}
+	root.SetHelpTemplate(root.HelpTemplate() + `
+Exit status: 0 on success; every ok:false response exits nonzero.
+1: API, authentication, or internal failure; 2: usage or input error.
+Local recovery exits: 3 not found, 4 ambiguous, 7 confirmation required,
+8 permission denied, 9 conflict or unknown write outcome. Never retry a write
+at exit 9 automatically. Inspect error.code and hint for recovery.
+When piping JSON through jq, enable shell pipefail to preserve CLI failures.
+`)
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.SetHelpCommand(&cobra.Command{Use: "help", Hidden: true, Args: cobra.ArbitraryArgs, RunE: func(*cobra.Command, []string) error {
 		return usageError("HELP_FLAG_REQUIRED", "use --help for prose help", nil)

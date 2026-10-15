@@ -2,21 +2,26 @@ package errx
 
 import (
 	"errors"
+	"slices"
 	"testing"
 )
 
-func TestExitContractIsStable(t *testing.T) {
+func TestProcessExitContract(t *testing.T) {
 	t.Parallel()
-	codes := Codes()
-	if len(codes) != 10 {
-		t.Fatalf("got %d exits", len(codes))
+	var got []Exit
+	for _, item := range Codes() {
+		got = append(got, item.Exit)
 	}
-	for index, item := range codes {
-		if int(item.Exit) != index {
-			t.Fatalf("exit %d moved to %d", index, item.Exit)
-		}
+	if want := []Exit{OK, Internal, Usage, NotFound, Ambiguous, ConfirmationRequired, PermissionDenied, Conflict}; !slices.Equal(got, want) {
+		t.Fatalf("process exits=%v want=%v", got, want)
+	}
+	codes := Codes()
+	codes[0].Name = "mutated"
+	if Codes()[0].Name != "OK" {
+		t.Fatal("Codes exposed mutable state")
 	}
 }
+
 func TestUnknownErrorIsSafeInternal(t *testing.T) {
 	t.Parallel()
 	secret := errors.New("xoxb-secret")

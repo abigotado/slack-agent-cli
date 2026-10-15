@@ -32,6 +32,7 @@ const (
 	MaxSkillDepth              = 8
 	MaxSlackIDBytes            = 64
 	MaxSlackTimestampBytes     = 64
+	DefaultCollectionLimit     = 50
 	MinCollectionLimit         = 1
 	MaxCollectionLimit         = 100
 	MinRetryAfterSeconds       = 1
