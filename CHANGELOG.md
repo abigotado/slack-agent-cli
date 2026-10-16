@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file.
   API, auth, and transport failures at exit 1 while retaining local recovery
   statuses and ambiguous-write exit 9. JSON schema and error bodies are unchanged.
 - Document defaults, process exits, and `pipefail` for JSON-consuming pipelines.
+- Require Go 1.26.9 or newer to include current standard-library security fixes.
 - Add process, envelope, limit-boundary, and parent-plus-replies regressions.
 - Let the Slack Skill reuse established profiles and resolve unambiguous
   exact-conversation reads from local workspace/identity and current allowlists,
