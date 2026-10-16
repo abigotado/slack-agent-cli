@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [0.3.1] - 2026-10-15
+## [0.3.1] - 2026-10-16
 
 - Default paginated conversation, history, and thread reads to 50 items;
   explicitly invalid limits still return `INVALID_LIMIT` at exit 2.
@@ -11,6 +11,9 @@ All notable changes to this project are documented in this file.
   statuses and ambiguous-write exit 9. JSON schema and error bodies are unchanged.
 - Document defaults, process exits, and `pipefail` for JSON-consuming pipelines.
 - Add process, envelope, limit-boundary, and parent-plus-replies regressions.
+- Let the Slack Skill reuse established profiles and resolve unambiguous
+  exact-conversation reads from local workspace/identity and current allowlists,
+  avoiding repeated profile prompts while preserving explicit CLI selectors.
 
 ## [0.3.0] - 2026-09-07
 

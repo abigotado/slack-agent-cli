@@ -117,6 +117,18 @@ slack-agent-cli auth status --profile bangr
 slack-agent-cli auth status --profile bangr --check
 ```
 
+### Agent profile selection
+
+The embedded Slack Skill reuses a compatible profile from the conversation.
+For an exact-conversation read without an established profile, it inspects
+local `auth list` and `auth allow-reads show` results, matches the requested
+workspace and identity, and selects the single profile whose current policy
+already permits the target. It reads immediately without asking for the
+profile name again. Ambiguous accounts or missing access still need input.
+An explicitly named profile is authoritative; a failure never silently selects
+a different account. The CLI continues to require `--profile NAME` on every
+network command. Profile discovery does not change policies or approve writes.
+
 ### Narrow direct-message-only profile
 
 For a workflow that needs only human one-to-one DMs, the embedded

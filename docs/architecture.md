@@ -88,6 +88,12 @@ workspace/team ID, workspace URL and display name, authenticated user and
 optional bot identity, enterprise identity when present, token kind, declared
 capabilities, and credential generation.
 
+The runtime Skill may select a profile for an exact-conversation read from
+trusted task context or an unambiguous local inventory and current read policy.
+It passes that exact name explicitly to every network invocation. Explicit
+current-request profiles are authoritative; network errors do not trigger
+silent account switching. No implicit CLI profile or policy expansion is added.
+
 The token enters through bounded stdin or a bounded hidden read from the
 process's controlling terminal. The interactive `--token-tty` path disables
 echo, intercepts interrupt, termination, hangup, and terminal-suspend requests,
