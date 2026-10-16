@@ -58,10 +58,10 @@ prebuilt executable or invoke `/usr/bin/security`.
 
 ### Go
 
-Go 1.25.14 or newer:
+Go 1.26.9 or newer:
 
 ```sh
-go install github.com/abigotado/slack-agent-cli/cmd/slack-agent-cli@v0.3.0
+go install github.com/abigotado/slack-agent-cli/cmd/slack-agent-cli@v0.3.1
 slack-agent-cli version
 ```
 
@@ -116,6 +116,18 @@ slack-agent-cli auth list
 slack-agent-cli auth status --profile bangr
 slack-agent-cli auth status --profile bangr --check
 ```
+
+### Agent profile selection
+
+The embedded Slack Skill reuses a compatible profile from the conversation.
+For an exact-conversation read without an established profile, it inspects
+local `auth list` and `auth allow-reads show` results, matches the requested
+workspace and identity, and selects the single profile whose current policy
+already permits the target. It reads immediately without asking for the
+profile name again. Ambiguous accounts or missing access still need input.
+An explicitly named profile is authoritative; a failure never silently selects
+a different account. The CLI continues to require `--profile NAME` on every
+network command. Profile discovery does not change policies or approve writes.
 
 ### Narrow direct-message-only profile
 
@@ -195,8 +207,12 @@ exact read IDs. Rebuild the write policy afterwards.
 
 ## Bounded reads
 
-Collection reads require a limit from 1 through 100. Start small and follow the
-opaque `meta.next_cursor` only while the task requires more data.
+`conversations list`, `messages history`, and `messages thread` default to
+`--limit 50`. An explicit limit must be from 1 through 100; `0`, negative values,
+and values above 100 fail with `INVALID_LIMIT` and exit 2. Follow the opaque
+`meta.next_cursor` only while the task requires more data. A thread page includes
+the parent and replies returned by Slack; check for a cursor before assuming the
+thread is complete.
 
 ```sh
 slack-agent-cli conversations list \
@@ -215,6 +231,42 @@ Normal output is one compact v1 JSON envelope:
 ```json
 {"ok":true,"v":1,"data":[],"meta":{"profile":"work","workspace_id":"T123","content_trust":"untrusted","count":0}}
 ```
+
+## Exit status and shell pipelines
+
+Success (`ok:true`) exits 0. Every failure (`ok:false`) exits nonzero, with the
+same v1 JSON envelope on stdout:
+
+| Exit | Meaning |
+| ---: | --- |
+| 0 | Success |
+| 1 | API, authentication, transport, or internal failure |
+| 2 | Usage or input error, including `INVALID_LIMIT` |
+| 3 | Local object or exact attachment not found |
+| 4 | Ambiguous local selection |
+| 7 | Exact confirmation required |
+| 8 | Local policy or capability denied the operation |
+| 9 | Conflict, stale state, or unknown write outcome |
+
+Use `error.code` and `hint` to choose recovery. Safe reads may be retried only
+when their error permits it; honor `error.retry_after_seconds` when present.
+Never retry a write automatically. Since v0.3.1 API/auth failures use exit 1;
+the former auth/read statuses 5 and 6 are no longer emitted. Local recovery
+statuses and ambiguous-write exit 9 are preserved.
+
+A shell normally reports only the last command's status in a pipeline. Both
+0.2.3 and 0.3.0 already exit 2 for `INVALID_LIMIT`, but `cli | jq '.data'` can
+still exit 0 and print `null`. Enable `pipefail` and inspect the envelope:
+
+```sh
+set -o pipefail
+slack-agent-cli messages thread --profile work \
+  --conversation-id C0123456789 --thread-ts 1234567890.123456 |
+  jq -e 'if .ok then .data else error(.error.code + ": " + .error.message) end'
+```
+
+This read uses the default limit of 50. A failure must never be interpreted as
+an empty message list.
 
 ## Guarded writes
 

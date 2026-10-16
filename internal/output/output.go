@@ -87,7 +87,7 @@ func (w *Writer) Failure(failure error) errx.Exit {
 	if err := w.write(Envelope{OK: false, V: contract.EnvelopeVersion, Error: body, Hint: typed.Hint}); err != nil {
 		w.diagnostic("SLACK_AGENT_CLI_OUTPUT_FAILURE\n")
 	}
-	return typed.Exit
+	return errx.ProcessExit(failure)
 }
 
 func (w *Writer) write(value Envelope) error {

@@ -7,7 +7,8 @@ import (
 	"time"
 )
 
-// Exit is a stable process status whose value identifies caller recovery.
+// Exit identifies an internal recovery category. ProcessExit maps failures to
+// the public process status without changing their safe JSON diagnostics.
 type Exit int
 
 // Stage is a fixed, non-secret diagnostic location. Recovery never depends on
@@ -105,10 +106,34 @@ func As(err error) *Error {
 	return New(Internal, "INTERNAL", "internal failure", "report this defect; do not retry unchanged").Wrap(err)
 }
 
-// ExitCode returns the stable process status for err.
+// ExitCode returns the internal recovery category for err.
 func ExitCode(err error) Exit { return As(err).Exit }
 
-// CodeInfo documents one stable status.
+// ProcessExit returns a nonzero public status for every failure. Remote API
+// rejections and authentication failures share status 1; local recovery and
+// ambiguous write outcomes retain their specific statuses.
+func ProcessExit(err error) Exit {
+	typed := As(err)
+	if typed.Exit <= OK || typed.Exit > Conflict {
+		return Internal
+	}
+	if typed.Exit == Conflict {
+		return Conflict
+	}
+	if typed.Exit == Auth || typed.Exit == Retryable {
+		return Internal
+	}
+	switch typed.Code {
+	case "SLACK_OBJECT_NOT_FOUND", "SLACK_WRITE_TARGET_UNAVAILABLE",
+		"SLACK_PERMISSION_DENIED", "SLACK_WRITE_PERMISSION_DENIED",
+		"SLACK_WRITE_REJECTED", "FILE_REDIRECT_REJECTED":
+		return Internal
+	default:
+		return typed.Exit
+	}
+}
+
+// CodeInfo documents one public process status.
 type CodeInfo struct {
 	Exit     Exit   `json:"exit"`
 	Name     string `json:"name"`
@@ -118,16 +143,14 @@ type CodeInfo struct {
 
 var codeTable = []CodeInfo{
 	{OK, "OK", "success", "proceed"},
-	{Internal, "INTERNAL", "internal failure", "report; do not retry unchanged"},
+	{Internal, "ERROR", "API, authentication, or internal failure", "inspect error.code and hint; never retry a write automatically"},
 	{Usage, "USAGE", "invalid flags or bounded input", "fix input"},
-	{NotFound, "NOT_FOUND", "object absent or invisible", "verify exact ID and profile"},
+	{NotFound, "NOT_FOUND", "local object or exact attachment absent", "verify exact ID and profile"},
 	{Ambiguous, "AMBIGUOUS", "multiple objects matched", "choose an exact object"},
-	{Auth, "AUTH", "credential missing or rejected", "login or rotate this profile"},
-	{Retryable, "RETRYABLE", "safe read may be retried", "back off and retry the read"},
 	{ConfirmationRequired, "CONFIRMATION_REQUIRED", "write approval missing", "review dry-run and confirm exact intent"},
-	{PermissionDenied, "PERMISSION_DENIED", "Slack or local policy denied operation", "request permission or explicit policy change"},
+	{PermissionDenied, "PERMISSION_DENIED", "local policy or capability denied operation", "request permission or explicit policy change"},
 	{Conflict, "CONFLICT", "stale or unknown write state", "re-read and reconcile; never retry automatically"},
 }
 
-// Codes returns a copy of the exit contract.
+// Codes returns a copy of the public process exit contract.
 func Codes() []CodeInfo { return append([]CodeInfo(nil), codeTable...) }

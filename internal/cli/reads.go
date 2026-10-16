@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/abigotado/slack-agent-cli/internal/contract"
 	"github.com/abigotado/slack-agent-cli/internal/cursor"
 	"github.com/abigotado/slack-agent-cli/internal/errx"
 	"github.com/abigotado/slack-agent-cli/internal/output"
@@ -74,7 +75,7 @@ func newConversationsListCommand(dependencies Dependencies) *cobra.Command {
 	}}
 	command.Flags().StringVar(&name, "profile", "", "exact profile name")
 	command.Flags().StringVar(&types, "types", "", "comma-separated public_channel,private_channel,im,mpim")
-	command.Flags().IntVar(&limit, "limit", 0, "page size 1-100")
+	command.Flags().IntVar(&limit, "limit", contract.DefaultCollectionLimit, "page size 1-100")
 	command.Flags().StringVar(&cursorValue, "cursor", "", "bound cursor from prior response")
 	return command
 }
@@ -146,7 +147,7 @@ func newHistoryCommand(dependencies Dependencies) *cobra.Command {
 	}}
 	command.Flags().StringVar(&name, "profile", "", "exact profile name")
 	command.Flags().StringVar(&conversationID, "conversation-id", "", "exact conversation ID")
-	command.Flags().IntVar(&limit, "limit", 0, "page size 1-100")
+	command.Flags().IntVar(&limit, "limit", contract.DefaultCollectionLimit, "page size 1-100")
 	command.Flags().StringVar(&cursorValue, "cursor", "", "bound cursor from prior response")
 	command.Flags().StringVar(&oldest, "oldest", "", "exclusive oldest Slack timestamp")
 	command.Flags().StringVar(&latest, "latest", "", "exclusive latest Slack timestamp")
@@ -190,7 +191,7 @@ func newThreadCommand(dependencies Dependencies) *cobra.Command {
 	command.Flags().StringVar(&name, "profile", "", "exact profile name")
 	command.Flags().StringVar(&conversationID, "conversation-id", "", "exact conversation ID")
 	command.Flags().StringVar(&threadTS, "thread-ts", "", "exact parent Slack timestamp")
-	command.Flags().IntVar(&limit, "limit", 0, "page size 1-100")
+	command.Flags().IntVar(&limit, "limit", contract.DefaultCollectionLimit, "page size 1-100")
 	command.Flags().StringVar(&cursorValue, "cursor", "", "bound cursor from prior response")
 	return command
 }

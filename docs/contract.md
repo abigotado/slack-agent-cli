@@ -29,21 +29,31 @@ appear in envelopes, errors, hints, or diagnostics.
 | Exit | Name | Required recovery |
 | ---: | --- | --- |
 | 0 | OK | proceed |
-| 1 | INTERNAL | report; do not retry unchanged |
+| 1 | ERROR | inspect `error.code` and `hint` for API/auth/internal recovery |
 | 2 | USAGE | fix flags or bounded input |
-| 3 | NOT_FOUND | verify exact ID and profile visibility |
+| 3 | NOT_FOUND | verify local object or exact attachment |
 | 4 | AMBIGUOUS | choose an exact candidate |
-| 5 | AUTH | login, rotate, or repair the exact profile |
-| 6 | RETRYABLE | honor bounded backoff and retry only the safe read |
 | 7 | CONFIRMATION_REQUIRED | review dry-run and approve exact intent |
-| 8 | PERMISSION_DENIED | request Slack permission or explicit policy change |
+| 8 | PERMISSION_DENIED | request explicit local policy or capability change |
 | 9 | CONFLICT | reconcile stale/unknown state; never retry a write automatically |
 
 Run `slack-agent-cli contract` for the machine-readable exit table, frozen v1
 bounds, and fixed Slack method matrix.
 
-Collection limits are enforced at both command and transport boundaries. An
-opaque pagination cursor is bound to the complete profile identity (including
+Every `ok:false` envelope exits nonzero. API, auth, and transport failures use
+exit 1; usage/input errors use exit 2. The internal recovery classifications
+remain available through safe error codes and hints, including bounded read
+backoff and `error.retry_after_seconds`. Versions before v0.3.1 used exits 5/6
+for auth/retryable reads and 3/8 for some remote API rejections; these remote
+failures now use 1. Local recovery exits remain 3/4/7/8/9, including ambiguous
+writes at 9. Shell pipelines require `set -o pipefail` to propagate the CLI's
+failure status through a successful consumer such as `jq`.
+
+`conversations list`, `messages history`, and `messages thread` use a default
+`--limit 50`. Explicit values outside 1-100 produce `INVALID_LIMIT` and exit 2.
+A thread page retains the parent plus replies; follow `meta.next_cursor` when
+present. Collection limits are enforced at both command and transport
+boundaries. An opaque pagination cursor is bound to the complete profile identity (including
 credential generation), workspace, operation, and normalized query; it cannot
 be reused after an account/profile transition.
 
@@ -96,8 +106,8 @@ paths are unsupported; only the selected T-workspace prefix is accepted. Maximum
 bytes and deadline 120000 ms, exposed in additive contract limits. The stream
 may read one extra byte solely to detect overflow; failed partials are removed.
 
-`FILE_NOT_IN_MESSAGE` is exit 3; `FILE_DOWNLOAD_UNSUPPORTED` and
-`FILE_REDIRECT_REJECTED` are exit 8; `FILE_TOO_LARGE` is exit 2.
+`FILE_NOT_IN_MESSAGE` is exit 3; `FILE_DOWNLOAD_UNSUPPORTED` is exit 8;
+`FILE_REDIRECT_REJECTED` is exit 1; `FILE_TOO_LARGE` is exit 2.
 `FILE_OUTPUT_EXISTS` is exit 9. `FILE_OUTPUT_FAILED` (including local disk
 write failures) and `FILE_CONTENT_UNSUPPORTED` (size mismatch, non-identity
 encoding, or HTML for non-HTML metadata) are exit 1: do not retry unchanged.

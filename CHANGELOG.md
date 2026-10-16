@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.1] - 2026-10-16
+
+- Default paginated conversation, history, and thread reads to 50 items;
+  explicitly invalid limits still return `INVALID_LIMIT` at exit 2.
+- Guarantee every failure envelope returns a nonzero process status. Consolidate
+  API, auth, and transport failures at exit 1 while retaining local recovery
+  statuses and ambiguous-write exit 9. JSON schema and error bodies are unchanged.
+- Document defaults, process exits, and `pipefail` for JSON-consuming pipelines.
+- Require Go 1.26.9 or newer to include current standard-library security fixes.
+- Add process, envelope, limit-boundary, and parent-plus-replies regressions.
+- Let the Slack Skill reuse established profiles and resolve unambiguous
+  exact-conversation reads from local workspace/identity and current allowlists,
+  avoiding repeated profile prompts while preserving explicit CLI selectors.
+
 ## [0.3.0] - 2026-09-07
 
 - Add typed file attachment metadata to message history and thread results.
@@ -63,3 +77,5 @@ All notable changes to this project are documented in this file.
 [0.2.3]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.2.3
 
 [0.3.0]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.3.0
+
+[0.3.1]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.3.1
