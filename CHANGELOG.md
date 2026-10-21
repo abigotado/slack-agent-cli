@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## [0.3.2] - 2026-10-21
 
 - Require Go 1.26.10 or newer for the standard-library certificate verification
   security fix reported by `GO-2026-6809`.
@@ -10,6 +10,8 @@ All notable changes to this project are documented in this file.
 - Normalize oversized Slack thread pages within the existing 100-message
   transport cap, returning bounded pages without losing overflow or repeating
   emitted replies. Preserve legacy bound thread cursors and the v1 JSON schema.
+- Report reply timestamps as `THREAD_PARENT_REQUIRED` at exit 2, and classify
+  malformed pages or unencodable continuations as `SLACK_RESPONSE_INVALID` at exit 1.
 - Clarify token recovery: a generic authentication rejection does not establish
   revocation, expiry, or clipboard contents; use human-controlled hidden input
   and reviewed policy rebinding after a successful credential replacement.
@@ -90,4 +92,5 @@ All notable changes to this project are documented in this file.
 
 [0.3.0]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.3.0
 
+[0.3.2]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.3.2
 [0.3.1]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.3.1
