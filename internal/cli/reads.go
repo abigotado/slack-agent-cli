@@ -187,7 +187,7 @@ func newThreadCommand(dependencies Dependencies) *cobra.Command {
 		}
 		next, err := cursor.BindThread(profileIdentity, current.profile.WorkspaceID, "conversations.replies", query, page.NextCursor)
 		if err != nil {
-			return err
+			return errx.New(errx.Internal, "SLACK_RESPONSE_INVALID", "Slack returned an invalid thread continuation", "report this response contract violation").Wrap(err)
 		}
 		count := len(page.Messages)
 		return dependencies.Output.Success(page.Messages, &output.Meta{Profile: name, WorkspaceID: current.profile.WorkspaceID, ContentTrust: "untrusted", Count: &count, NextCursor: next})

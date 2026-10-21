@@ -67,7 +67,7 @@ be reused after an account/profile transition.
 `--thread-ts` requires the parent timestamp. A coherent initial page identifying
 an earlier parent returns `THREAD_PARENT_REQUIRED` at exit 2 with guidance to
 use the message's `thread_ts`. Malformed, unordered, duplicate or wrong-thread
-pages and invalid/non-progressing native cursors return `SLACK_RESPONSE_INVALID`
+pages and invalid/non-progressing or unencodable native cursors return `SLACK_RESPONSE_INVALID`
 at exit 1. Stop that pagination chain and report the response violation; do not
 interpret it as an empty thread or retry the same cursor automatically.
 

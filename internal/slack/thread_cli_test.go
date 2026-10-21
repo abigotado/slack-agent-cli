@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/abigotado/slack-agent-cli/internal/auth"
@@ -30,6 +31,23 @@ func (readCredentialStore) Save(context.Context, string, auth.Credential) error 
 }
 func (readCredentialStore) Delete(context.Context, string) error {
 	return errors.New("unexpected credential deletion")
+}
+
+func threadCLIDependencies(t *testing.T, client *slack.Client) (cli.Dependencies, *bytes.Buffer) {
+	t.Helper()
+	root := t.TempDir()
+	profiles := profile.NewRegistry(filepath.Join(root, "config", "profiles.json"))
+	policies := policy.NewRegistry(filepath.Join(root, "config", "policies.json"))
+	p := profile.Profile{Name: "work", WorkspaceID: "T1", WorkspaceName: "Example", WorkspaceURL: "https://example.slack.com", UserID: "U1", TokenKind: profile.TokenUser, Capabilities: []profile.Capability{profile.CapabilityRead}, CredentialGeneration: "g1"}
+	if err := profiles.Put(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := policies.Replace(context.Background(), p, policy.Read, []policy.Target{{ConversationID: "C1"}}); err != nil {
+		t.Fatal(err)
+	}
+	stdout := &bytes.Buffer{}
+	d := cli.Dependencies{Profiles: profiles, Policies: policies, Credentials: readCredentialStore{auth.Credential{Version: 1, Token: "sentinel", ProfileIdentity: profile.Identity(p), Generation: "g1", Capabilities: p.Capabilities}}, Conversations: client, Messages: client, Output: &output.Writer{Out: stdout, Err: &bytes.Buffer{}}}
+	return d, stdout
 }
 
 func TestThreadWithoutLimitPaginatesOversizedSlackPage(t *testing.T) {
@@ -61,18 +79,7 @@ func TestThreadWithoutLimitPaginatesOversizedSlackPage(t *testing.T) {
 	}))
 	defer server.Close()
 	client := slack.NewTestClient(server.URL, server.Client())
-	root := t.TempDir()
-	profiles := profile.NewRegistry(filepath.Join(root, "config", "profiles.json"))
-	policies := policy.NewRegistry(filepath.Join(root, "config", "policies.json"))
-	p := profile.Profile{Name: "work", WorkspaceID: "T1", WorkspaceName: "Example", WorkspaceURL: "https://example.slack.com", UserID: "U1", TokenKind: profile.TokenUser, Capabilities: []profile.Capability{profile.CapabilityRead}, CredentialGeneration: "g1"}
-	if err := profiles.Put(context.Background(), p); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := policies.Replace(context.Background(), p, policy.Read, []policy.Target{{ConversationID: "C1"}}); err != nil {
-		t.Fatal(err)
-	}
-	stdout := &bytes.Buffer{}
-	d := cli.Dependencies{Profiles: profiles, Policies: policies, Credentials: readCredentialStore{auth.Credential{Version: 1, Token: "sentinel", ProfileIdentity: profile.Identity(p), Generation: "g1", Capabilities: p.Capabilities}}, Conversations: client, Messages: client, Output: &output.Writer{Out: stdout, Err: &bytes.Buffer{}}}
+	d, stdout := threadCLIDependencies(t, client)
 	cursor := ""
 	seen := map[string]bool{}
 	for page, want := range []int{50, 19} {
@@ -112,5 +119,41 @@ func TestThreadWithoutLimitPaginatesOversizedSlackPage(t *testing.T) {
 	}
 	if len(seen) != 69 || !seen[parent] || requests != 2 {
 		t.Fatalf("lost messages or excess requests: unique=%d requests=%d", len(seen), requests)
+	}
+}
+
+func TestThreadRejectsOversizedFinalBoundCursor(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/conversations.info":
+			_, _ = w.Write([]byte(`{"ok":true,"channel":{"id":"C1","is_channel":true,"is_shared":false,"is_ext_shared":false,"is_org_shared":false}}`))
+		case "/api/conversations.replies":
+			if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "messages": []slack.Message{{TS: "1.000001"}}, "response_metadata": map[string]string{"next_cursor": strings.Repeat("x", 3000)}}); err != nil {
+				t.Error(err)
+			}
+		default:
+			t.Errorf("unexpected route: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	client := slack.NewTestClient(server.URL, server.Client())
+	// This native cursor fits the transport's continuation budget but cannot
+	// fit after the CLI adds profile/query bindings and base64 encoding.
+	page, err := client.Replies(context.Background(), slack.Token("sentinel"), slack.ThreadOptions{ConversationID: "C1", ThreadTS: "1.000001", Limit: 50})
+	if err != nil || page.NextCursor == "" {
+		t.Fatalf("transport continuation: page=%+v error=%v", page, err)
+	}
+	d, stdout := threadCLIDependencies(t, client)
+	if exit := cli.Run(context.Background(), []string{"messages", "thread", "--profile", "work", "--conversation-id", "C1", "--thread-ts", "1.000001"}, d); exit != errx.Internal {
+		t.Fatalf("exit=%d output=%s", exit, stdout)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope["ok"] != false || envelope["data"] != nil || envelope["meta"] != nil || envelope["error"].(map[string]any)["code"] != "SLACK_RESPONSE_INVALID" {
+		t.Fatalf("unsafe cursor overflow envelope: %s", stdout)
 	}
 }

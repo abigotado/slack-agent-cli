@@ -47,7 +47,7 @@ concurrent edits/deletions. Legacy bound thread cursors remain accepted.
 
 `--thread-ts` requires the parent timestamp. `THREAD_PARENT_REQUIRED` is exit 2:
 read the message and pass its `thread_ts`. `SLACK_RESPONSE_INVALID` is exit 1
-for malformed/unordered/wrong-thread pages or invalid/non-progressing native
+for malformed/unordered/wrong-thread pages or invalid/non-progressing/unencodable native
 cursors. Stop that pagination chain and report the violation; do not treat it
 as an empty thread or automatically retry the same cursor.
 
