@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- Normalize oversized Slack thread pages within the existing 100-message
+  transport cap, returning bounded pages without losing overflow or repeating
+  emitted replies. Preserve legacy bound thread cursors and the v1 JSON schema.
+- Clarify token recovery: a generic authentication rejection does not establish
+  revocation, expiry, or clipboard contents; use human-controlled hidden input
+  and reviewed policy rebinding after a successful credential replacement.
+
 ## [0.3.1] - 2026-10-16
 
 - Default paginated conversation, history, and thread reads to 50 items;

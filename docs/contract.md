@@ -51,11 +51,23 @@ failure status through a successful consumer such as `jq`.
 
 `conversations list`, `messages history`, and `messages thread` use a default
 `--limit 50`. Explicit values outside 1-100 produce `INVALID_LIMIT` and exit 2.
-A thread page retains the parent plus replies; follow `meta.next_cursor` when
-present. Collection limits are enforced at both command and transport
-boundaries. An opaque pagination cursor is bound to the complete profile identity (including
+A first thread page retains the parent plus replies; subsequent pages omit
+already-emitted timestamps, including repeated parents. Each output page has at
+most the requested limit. A native thread page containing extra items up to the
+fixed transport maximum of 100 is resumed by refetching that same native page
+with a timestamp frontier before advancing Slack's cursor. Pages above 100 fail
+with `SLACK_RESPONSE_COUNT_EXCEEDED` and exit 1. History, conversation lists,
+and inclusive/time-filtered attachment proofs retain their strict per-request
+transport bounds. Follow `meta.next_cursor` when present, even after an empty
+page. Concurrent edits/deletions do not provide snapshot completeness.
+An opaque pagination cursor is bound to the complete profile identity (including
 credential generation), workspace, operation, and normalized query; it cannot
 be reused after an account/profile transition.
+
+Thread continuations use a private cursor encoding distinct from legacy native
+cursors. Existing v1 bound thread cursors remain accepted as native cursors;
+other commands keep their existing cursor encoding. The public JSON envelope
+and `meta.next_cursor` string schema are unchanged.
 
 `auth login` requires exactly one secret-input selector: `--token-stdin` or
 `--token-tty`. The latter reads one bounded hidden line from the controlling

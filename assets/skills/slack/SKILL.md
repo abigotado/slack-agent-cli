@@ -99,6 +99,20 @@ added to policy. Token login imports the credential into Keychain; it neither
 issues the token nor grants scopes. Group DM use is conditional on its live
 acceptance gate and never bypasses missing shared-state fields.
 
+`SLACK_AUTH_REJECTED` confirms only that Slack rejected the credential for that
+request. Do not assert revocation, expiration, a wrong workspace, or clipboard
+contents from this normalized error. A failed `auth login` does not replace the
+stored credential. Do not require a guessed token prefix or fixed length.
+Direct the operator to their application's **OAuth & Permissions** page at
+`https://api.slack.com/apps` to obtain an already-issued User OAuth Token, then
+have them import it in their own terminal with `auth login --profile NAME
+--token-kind user --capability read --token-tty` (retain other intended declared
+capabilities). Never inspect their clipboard or handle the token yourself.
+If no user token is available, clarify the application's installation/scopes;
+do not prescribe reinstalling it, disabling rotation, or replacing policies
+without evidence and authorization. A successful import changes the credential
+generation and needs reviewed policy rebinding before further content reads.
+
 Read `reference/commands.md` for the fixed command surface and
 `reference/contract.md` before parsing results.
 

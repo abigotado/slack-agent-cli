@@ -81,6 +81,18 @@ typed DTO. Redirects are disabled. Upstream bodies, request URLs, headers,
 tokens, and outbound message text do not enter errors or logs. HTTP success is
 not API success until the bounded JSON object has `ok: true`.
 
+Plain thread reads validate the complete native page (at most 100 messages)
+before returning at most the requested limit. A stateless continuation retains
+the native page start and last emitted timestamp; overflow is consumed by
+refetching that page, then the native cursor advances. Full-page chronological
+and thread-identity checks precede slicing. Timestamp filtering removes repeated
+parents and overlapping replies without caching Slack content. Empty pages may
+advance a native cursor; an immediate repeated cursor fails. No hidden paging
+loop is performed. Inclusive/time-filtered reads used for attachment proofs
+keep their strict per-request count bound. Thread cursor versions separate this
+transport state from legacy native cursors while preserving the existing local
+profile, generation, workspace and query bindings.
+
 ## Profiles and credentials
 
 Every network invocation names a profile. One profile binds its name,

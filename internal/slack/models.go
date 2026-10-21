@@ -121,6 +121,7 @@ type HistoryOptions struct {
 
 // ThreadOptions defines a bounded exact thread read.
 type ThreadOptions struct {
+	PageCursor     string
 	Oldest         string
 	Latest         string
 	Inclusive      bool

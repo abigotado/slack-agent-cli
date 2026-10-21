@@ -173,15 +173,19 @@ func newThreadCommand(dependencies Dependencies) *cobra.Command {
 		}
 		query := fmt.Sprintf("conversation=%s&thread=%s&limit=%d", conversationID, threadTS, limit)
 		profileIdentity := profile.Identity(current.profile)
-		upstream, err := cursor.Unbind(cursorValue, profileIdentity, current.profile.WorkspaceID, "conversations.replies", query)
+		upstream, normalized, err := cursor.UnbindThread(cursorValue, profileIdentity, current.profile.WorkspaceID, "conversations.replies", query)
 		if err != nil {
 			return usageError("INVALID_CURSOR", "cursor does not match this request", err)
 		}
-		page, err := dependencies.Messages.Replies(command.Context(), current.token, slack.ThreadOptions{ConversationID: conversationID, ThreadTS: threadTS, Limit: limit, Cursor: upstream})
+		options := slack.ThreadOptions{ConversationID: conversationID, ThreadTS: threadTS, Limit: limit, Cursor: upstream}
+		if normalized {
+			options.Cursor, options.PageCursor = "", upstream
+		}
+		page, err := dependencies.Messages.Replies(command.Context(), current.token, options)
 		if err != nil {
 			return err
 		}
-		next, err := cursor.Bind(profileIdentity, current.profile.WorkspaceID, "conversations.replies", query, page.NextCursor)
+		next, err := cursor.BindThread(profileIdentity, current.profile.WorkspaceID, "conversations.replies", query, page.NextCursor)
 		if err != nil {
 			return err
 		}
