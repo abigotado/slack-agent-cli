@@ -261,6 +261,62 @@ func TestThreadContinuationGuardsBeforeDispatch(t *testing.T) {
 	}
 }
 
+func TestThreadCanonicalContinuationGuardsBeforeDispatch(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		mutate func(*threadContinuation)
+	}{
+		{"obsolete version", func(s *threadContinuation) { s.Version = 1 }},
+		{"direction above bound", func(s *threadContinuation) { s.Direction = 2 }},
+		{"direction below bound", func(s *threadContinuation) { s.Direction = -2 }},
+		{"direction without previous range", func(s *threadContinuation) { s.Direction = 1 }},
+		{"inverted page range", func(s *threadContinuation) { s.PageMin, s.PageMax = "4.0", "2.0" }},
+		{"inverted previous range", func(s *threadContinuation) { s.PreviousMin, s.PreviousMax = "7.0", "6.0" }},
+		{"after without page range", func(s *threadContinuation) { s.PageMin, s.PageMax = "", "" }},
+		{"page range without after", func(s *threadContinuation) { s.After = "" }},
+		{"after above page range", func(s *threadContinuation) { s.After = "5.0" }},
+		{"after below page range", func(s *threadContinuation) { s.After = "1.5" }},
+		{"previous minimum is parent", func(s *threadContinuation) { s.PreviousMin, s.PreviousMax = "1.000001", "1.5" }},
+		{"previous minimum before parent", func(s *threadContinuation) { s.PreviousMin, s.PreviousMax = "1.0", "1.5" }},
+		{"page minimum is parent", func(s *threadContinuation) { s.PageMin = "1.000001" }},
+		{"page minimum before parent", func(s *threadContinuation) { s.PageMin = "1.0" }},
+		{"overlapping ranges", func(s *threadContinuation) { s.PreviousMin, s.PreviousMax = "3.0", "5.0" }},
+		{"ascending direction disagrees", func(s *threadContinuation) { s.PreviousMin, s.PreviousMax, s.Direction = "6.0", "7.0", 1 }},
+		{"descending direction disagrees", func(s *threadContinuation) { s.PreviousMin, s.PreviousMax, s.Direction = "1.5", "1.9", -1 }},
+		{"direction missing for disjoint ranges", func(s *threadContinuation) { s.PreviousMin, s.PreviousMax = "6.0", "7.0" }},
+		{"previous minimum missing", func(s *threadContinuation) { s.PreviousMax = "7.0" }},
+		{"previous maximum missing", func(s *threadContinuation) { s.PreviousMin = "6.0" }},
+		{"page minimum missing", func(s *threadContinuation) { s.PageMin = "" }},
+		{"page maximum missing", func(s *threadContinuation) { s.PageMax = "" }},
+		{"malformed previous minimum", func(s *threadContinuation) { s.PreviousMin, s.PreviousMax = "NaN", "7.0" }},
+		{"malformed previous maximum", func(s *threadContinuation) { s.PreviousMin, s.PreviousMax = "6.0", "NaN" }},
+		{"malformed page minimum", func(s *threadContinuation) { s.PageMin = "NaN" }},
+		{"malformed page maximum", func(s *threadContinuation) { s.PageMax = "NaN" }},
+		{"malformed after", func(s *threadContinuation) { s.After = "NaN" }},
+		{"invalid native cursor", func(s *threadContinuation) { s.Upstream = "bad\ncursor" }},
+		{"empty continuation", func(s *threadContinuation) { s.Upstream, s.After, s.PageMin, s.PageMax = "", "", "", "" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			state := threadContinuation{Version: 2, Upstream: "native", After: "3.0", PageMin: "2.0", PageMax: "4.0"}
+			test.mutate(&state)
+			encoded, err := json.Marshal(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requests := 0
+			client := newTestClient("https://slack.invalid", &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				requests++
+				return nil, fmt.Errorf("unexpected dispatch")
+			})})
+			page, err := client.Replies(context.Background(), Token("sentinel"), ThreadOptions{ConversationID: "C1", ThreadTS: "1.000001", Limit: 50, PageCursor: string(encoded)})
+			if err == nil || errx.As(err).Code != "INVALID_CURSOR" || errx.ProcessExit(err) != errx.Usage || requests != 0 || len(page.Messages) != 0 || page.NextCursor != "" {
+				t.Fatalf("invalid canonical cursor: requests=%d page=%+v error=%v", requests, page, err)
+			}
+		})
+	}
+}
+
 func TestThreadRejectsOversizedEncodedContinuation(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -326,6 +382,9 @@ func TestThreadNativeRangeOrder(t *testing.T) {
 				if test.rejectLast && index == len(test.pages)-1 {
 					if err == nil || errx.As(err).Code != "SLACK_RESPONSE_INVALID" || len(page.Messages) != 0 || page.NextCursor != "" {
 						t.Fatalf("accepted overlapping/reversing range: page=%+v error=%v", page, err)
+					}
+					if errx.ProcessExit(err) != errx.Internal || errx.As(err).Hint != "restart this thread read from the first page without --cursor; do not reuse the previous cursor" {
+						t.Fatalf("missing safe restart guidance: %+v", errx.As(err))
 					}
 					break
 				}

@@ -43,7 +43,8 @@ resumed by refetching the same page before advancing Slack's cursor. Its
 timestamp frontier resets at native transitions, which may lead to older or
 newer replies. Native reply ranges must remain disjoint in their inferred
 direction; overlapping ranges or a reversal fail with `SLACK_RESPONSE_INVALID`
-at exit 1. Above 100
+at exit 1, with a hint to restart the thread read from the first page without
+`--cursor` instead of reusing that pagination chain. Above 100
 still fails with `SLACK_RESPONSE_COUNT_EXCEEDED` and exit 1. History/list and
 attachment-proof count bounds remain strict. Follow opaque `meta.next_cursor`
 only as needed, including after an empty page. Pagination is not a snapshot of

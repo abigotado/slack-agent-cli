@@ -180,7 +180,7 @@ func (c *Client) threadPage(ctx context.Context, token Token, options ThreadOpti
 	}
 	direction, valid := threadRangeDirection(state.PreviousMin, state.PreviousMax, next.PageMin, next.PageMax)
 	if !valid || (direction != 0 && state.Direction != 0 && state.Direction != direction) {
-		return MessagePage{}, invalidThreadPage()
+		return MessagePage{}, errx.New(errx.Internal, "SLACK_RESPONSE_INVALID", "Slack thread pages overlap or changed direction", "restart this thread read from the first page without --cursor; do not reuse the previous cursor")
 	}
 	if direction != 0 {
 		next.Direction = direction

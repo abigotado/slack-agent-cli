@@ -59,7 +59,9 @@ with a page-local timestamp frontier before advancing Slack's cursor. The
 frontier resets on each native cursor transition, allowing pages towards older
 or newer replies. Accepted native reply ranges must be disjoint and preserve
 their inferred direction; overlap or reversal fails with `SLACK_RESPONSE_INVALID`
-at exit 1. Plain reads reserve one raw item for a possible extra parent by
+at exit 1, with guidance to restart from the first page without `--cursor`
+instead of reusing that pagination chain. Plain reads reserve one raw item for a
+possible extra parent by
 requesting at most 99 replies, while the public output limit remains 1-100.
 Pages above 100 fail
 with `SLACK_RESPONSE_COUNT_EXCEEDED` and exit 1. History, conversation lists,
