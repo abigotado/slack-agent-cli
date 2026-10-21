@@ -31,6 +31,10 @@ func invalidThreadPage() error {
 	return errx.New(errx.Internal, "SLACK_RESPONSE_INVALID", "Slack returned an invalid thread page", "report this response contract violation")
 }
 
+func changedThreadPageOrder() error {
+	return errx.New(errx.Internal, "SLACK_RESPONSE_INVALID", "Slack thread pages overlap or changed direction", "restart this thread read once from the first page without --cursor; if this happens again, stop and report it")
+}
+
 func validThreadTimestamp(value string) bool {
 	return len(value) <= contract.MaxSlackTimestampBytes && validSlackTimestamp(value)
 }
@@ -180,7 +184,7 @@ func (c *Client) threadPage(ctx context.Context, token Token, options ThreadOpti
 	}
 	direction, valid := threadRangeDirection(state.PreviousMin, state.PreviousMax, next.PageMin, next.PageMax)
 	if !valid || (direction != 0 && state.Direction != 0 && state.Direction != direction) {
-		return MessagePage{}, errx.New(errx.Internal, "SLACK_RESPONSE_INVALID", "Slack thread pages overlap or changed direction", "restart this thread read from the first page without --cursor; do not reuse the previous cursor")
+		return MessagePage{}, changedThreadPageOrder()
 	}
 	if direction != 0 {
 		next.Direction = direction

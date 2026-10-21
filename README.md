@@ -232,10 +232,10 @@ limit. If Slack returns extra messages, the cursor resumes that native page
 before advancing to the next one. This may refetch a page; it is not a snapshot
 of a concurrently changing thread. Native pages may run towards older or newer
 replies. Overlapping native ranges or a change in their direction fails with
-`SLACK_RESPONSE_INVALID` at exit 1, with a hint to restart the thread read from
-the first page without `--cursor`. Do not reuse that pagination chain. A raw
-Slack page above the fixed 100-message
-transport bound still fails with `SLACK_RESPONSE_COUNT_EXCEEDED` and exit 1.
+`SLACK_RESPONSE_INVALID` at exit 1, with a hint to restart the thread read once
+from the first page without `--cursor`. If it happens again, stop and report it.
+A raw Slack page above the fixed 100-message transport bound still fails with
+`SLACK_RESPONSE_COUNT_EXCEEDED` and exit 1.
 Check for a cursor before assuming the thread is complete.
 
 ```sh

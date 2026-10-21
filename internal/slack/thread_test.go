@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -267,6 +268,7 @@ func TestThreadCanonicalContinuationGuardsBeforeDispatch(t *testing.T) {
 		name   string
 		mutate func(*threadContinuation)
 	}{
+		{"valid continuation", nil},
 		{"obsolete version", func(s *threadContinuation) { s.Version = 1 }},
 		{"direction above bound", func(s *threadContinuation) { s.Direction = 2 }},
 		{"direction below bound", func(s *threadContinuation) { s.Direction = -2 }},
@@ -299,7 +301,9 @@ func TestThreadCanonicalContinuationGuardsBeforeDispatch(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			state := threadContinuation{Version: 2, Upstream: "native", After: "3.0", PageMin: "2.0", PageMax: "4.0"}
-			test.mutate(&state)
+			if test.mutate != nil {
+				test.mutate(&state)
+			}
 			encoded, err := json.Marshal(state)
 			if err != nil {
 				t.Fatal(err)
@@ -307,9 +311,15 @@ func TestThreadCanonicalContinuationGuardsBeforeDispatch(t *testing.T) {
 			requests := 0
 			client := newTestClient("https://slack.invalid", &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 				requests++
-				return nil, fmt.Errorf("unexpected dispatch")
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"ok":true,"messages":[{"ts":"4.0","thread_ts":"1.000001"}]}`))}, nil
 			})})
 			page, err := client.Replies(context.Background(), Token("sentinel"), ThreadOptions{ConversationID: "C1", ThreadTS: "1.000001", Limit: 50, PageCursor: string(encoded)})
+			if test.mutate == nil {
+				if err != nil || requests != 1 || len(page.Messages) != 1 || page.Messages[0].TS != "4.0" || page.NextCursor != "" {
+					t.Fatalf("valid base continuation rejected: requests=%d page=%+v error=%v", requests, page, err)
+				}
+				return
+			}
 			if err == nil || errx.As(err).Code != "INVALID_CURSOR" || errx.ProcessExit(err) != errx.Usage || requests != 0 || len(page.Messages) != 0 || page.NextCursor != "" {
 				t.Fatalf("invalid canonical cursor: requests=%d page=%+v error=%v", requests, page, err)
 			}
@@ -383,7 +393,7 @@ func TestThreadNativeRangeOrder(t *testing.T) {
 					if err == nil || errx.As(err).Code != "SLACK_RESPONSE_INVALID" || len(page.Messages) != 0 || page.NextCursor != "" {
 						t.Fatalf("accepted overlapping/reversing range: page=%+v error=%v", page, err)
 					}
-					if errx.ProcessExit(err) != errx.Internal || errx.As(err).Hint != "restart this thread read from the first page without --cursor; do not reuse the previous cursor" {
+					if errx.ProcessExit(err) != errx.Internal || errx.As(err).Hint != "restart this thread read once from the first page without --cursor; if this happens again, stop and report it" {
 						t.Fatalf("missing safe restart guidance: %+v", errx.As(err))
 					}
 					break
