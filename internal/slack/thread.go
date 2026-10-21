@@ -13,9 +13,14 @@ import (
 )
 
 type threadContinuation struct {
-	Version  int    `json:"v"`
-	Upstream string `json:"upstream"`
-	After    string `json:"after"`
+	Version     int    `json:"v"`
+	Upstream    string `json:"upstream"`
+	After       string `json:"after"`
+	PreviousMin string `json:"previous_min"`
+	PreviousMax string `json:"previous_max"`
+	PageMin     string `json:"page_min"`
+	PageMax     string `json:"page_max"`
+	Direction   int    `json:"direction"`
 }
 
 func invalidThreadCursor() error {
@@ -51,8 +56,28 @@ func validNativeThreadCursor(value string) bool {
 	return len(value) <= contract.MaxCursorBytes && !strings.ContainsAny(value, "\r\n\x00")
 }
 
+func validThreadRange(minimum, maximum string) bool {
+	if minimum == "" || maximum == "" {
+		return minimum == "" && maximum == ""
+	}
+	return validThreadTimestamp(minimum) && validThreadTimestamp(maximum) && compareThreadTimestamps(minimum, maximum) <= 0
+}
+
+func threadRangeDirection(previousMin, previousMax, pageMin, pageMax string) (int, bool) {
+	if previousMin == "" || pageMin == "" {
+		return 0, true
+	}
+	if compareThreadTimestamps(pageMin, previousMax) > 0 {
+		return 1, true
+	}
+	if compareThreadTimestamps(pageMax, previousMin) < 0 {
+		return -1, true
+	}
+	return 0, false
+}
+
 func readThreadContinuation(options ThreadOptions) (threadContinuation, error) {
-	state := threadContinuation{Version: 1, Upstream: options.Cursor}
+	state := threadContinuation{Version: 2, Upstream: options.Cursor}
 	if !validNativeThreadCursor(options.Cursor) || (options.Cursor != "" && options.PageCursor != "") {
 		return state, invalidThreadCursor()
 	}
@@ -63,9 +88,24 @@ func readThreadContinuation(options ThreadOptions) (threadContinuation, error) {
 		return state, invalidThreadCursor()
 	}
 	canonical, err := json.Marshal(state)
-	if err != nil || string(canonical) != options.PageCursor || state.Version != 1 ||
+	if err != nil || string(canonical) != options.PageCursor || state.Version != 2 ||
 		!validNativeThreadCursor(state.Upstream) || (state.After != "" && !validThreadTimestamp(state.After)) ||
-		(state.Upstream == "" && state.After == "") {
+		(state.Upstream == "" && state.After == "") ||
+		!validThreadRange(state.PreviousMin, state.PreviousMax) || !validThreadRange(state.PageMin, state.PageMax) ||
+		(state.After == "") != (state.PageMin == "") || state.Direction < -1 || state.Direction > 1 ||
+		(state.Direction != 0 && state.PreviousMin == "") {
+		return state, invalidThreadCursor()
+	}
+	if state.After != "" && (compareThreadTimestamps(state.After, state.PageMax) > 0 ||
+		(compareThreadTimestamps(state.After, state.PageMin) < 0 && state.After != options.ThreadTS)) {
+		return state, invalidThreadCursor()
+	}
+	if (state.PreviousMin != "" && compareThreadTimestamps(state.PreviousMin, options.ThreadTS) <= 0) ||
+		(state.PageMin != "" && compareThreadTimestamps(state.PageMin, options.ThreadTS) <= 0) {
+		return state, invalidThreadCursor()
+	}
+	direction, valid := threadRangeDirection(state.PreviousMin, state.PreviousMax, state.PageMin, state.PageMax)
+	if !valid || (direction != 0 && state.Direction != direction) {
 		return state, invalidThreadCursor()
 	}
 	return state, nil
@@ -85,6 +125,7 @@ func validateThreadMessages(messages []Message, parent string, initial bool) err
 	}
 	for index, message := range messages {
 		if !validThreadTimestamp(message.TS) || compareThreadTimestamps(message.TS, parent) < 0 ||
+			(compareThreadTimestamps(message.TS, parent) == 0 && message.TS != parent) ||
 			(index > 0 && compareThreadTimestamps(messages[index-1].TS, message.TS) >= 0) {
 			return invalidThreadPage()
 		}
@@ -104,7 +145,9 @@ func (c *Client) threadPage(ctx context.Context, token Token, options ThreadOpti
 	if err != nil {
 		return MessagePage{}, err
 	}
-	values := url.Values{"channel": {options.ConversationID}, "ts": {options.ThreadTS}, "limit": {strconv.Itoa(options.Limit)}}
+	// Slack may return the parent in addition to the requested reply count.
+	upstreamLimit := min(options.Limit, contract.MaxCollectionLimit-1)
+	values := url.Values{"channel": {options.ConversationID}, "ts": {options.ThreadTS}, "limit": {strconv.Itoa(upstreamLimit)}}
 	if state.Upstream != "" {
 		values.Set("cursor", state.Upstream)
 	}
@@ -123,6 +166,25 @@ func (c *Client) threadPage(ctx context.Context, token Token, options ThreadOpti
 	if !validNativeThreadCursor(upstream) || (upstream != "" && upstream == state.Upstream) {
 		return MessagePage{}, invalidThreadPage()
 	}
+	next := state
+	for _, message := range response.Messages {
+		if message.TS == options.ThreadTS {
+			continue
+		}
+		if next.PageMin == "" || compareThreadTimestamps(message.TS, next.PageMin) < 0 {
+			next.PageMin = message.TS
+		}
+		if next.PageMax == "" || compareThreadTimestamps(message.TS, next.PageMax) > 0 {
+			next.PageMax = message.TS
+		}
+	}
+	direction, valid := threadRangeDirection(state.PreviousMin, state.PreviousMax, next.PageMin, next.PageMax)
+	if !valid || (direction != 0 && state.Direction != 0 && state.Direction != direction) {
+		return MessagePage{}, invalidThreadPage()
+	}
+	if direction != 0 {
+		next.Direction = direction
+	}
 	remaining := make([]Message, 0, len(response.Messages))
 	for _, message := range response.Messages {
 		if (!initial && message.TS == options.ThreadTS) || (state.After != "" && compareThreadTimestamps(message.TS, state.After) <= 0) {
@@ -132,7 +194,6 @@ func (c *Client) threadPage(ctx context.Context, token Token, options ThreadOpti
 	}
 	count := min(len(remaining), options.Limit)
 	result := MessagePage{Messages: remaining[:count]}
-	next := state
 	if count > 0 {
 		next.After = result.Messages[count-1].TS
 	}
@@ -141,6 +202,11 @@ func (c *Client) threadPage(ctx context.Context, token Token, options ThreadOpti
 			return result, nil
 		}
 		next.Upstream = upstream
+		next.After = ""
+		if next.PageMin != "" {
+			next.PreviousMin, next.PreviousMax = next.PageMin, next.PageMax
+		}
+		next.PageMin, next.PageMax = "", ""
 	}
 	// Refetch the same native page until its overflow is consumed; advancing
 	// Slack's cursor here would skip messages that were not emitted yet.

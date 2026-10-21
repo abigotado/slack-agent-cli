@@ -55,7 +55,13 @@ A first thread page retains the parent plus replies; subsequent pages omit
 already-emitted timestamps, including repeated parents. Each output page has at
 most the requested limit. A native thread page containing extra items up to the
 fixed transport maximum of 100 is resumed by refetching that same native page
-with a timestamp frontier before advancing Slack's cursor. Pages above 100 fail
+with a page-local timestamp frontier before advancing Slack's cursor. The
+frontier resets on each native cursor transition, allowing pages towards older
+or newer replies. Accepted native reply ranges must be disjoint and preserve
+their inferred direction; overlap or reversal fails with `SLACK_RESPONSE_INVALID`
+at exit 1. Plain reads reserve one raw item for a possible extra parent by
+requesting at most 99 replies, while the public output limit remains 1-100.
+Pages above 100 fail
 with `SLACK_RESPONSE_COUNT_EXCEEDED` and exit 1. History, conversation lists,
 and inclusive/time-filtered attachment proofs retain their strict per-request
 transport bounds. Follow `meta.next_cursor` when present, even after an empty

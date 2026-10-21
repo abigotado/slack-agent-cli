@@ -86,12 +86,18 @@ not API success until the bounded JSON object has `ok: true`.
 
 Plain thread reads validate the complete native page (at most 100 messages)
 before returning at most the requested limit. A stateless continuation retains
-the native page start and last emitted timestamp; overflow is consumed by
-refetching that page, then the native cursor advances. Full-page chronological
-and thread-identity checks precede slicing. Timestamp filtering removes repeated
-parents and overlapping replies without caching Slack content. Empty pages may
-advance a native cursor; an immediate repeated cursor fails. No hidden paging
-loop is performed. Inclusive/time-filtered reads used for attachment proofs
+the native page start and a page-local last emitted timestamp; overflow is
+consumed by refetching that page before advancing Slack's cursor and resetting
+the frontier. The observed current page range persists across refetches; only
+after consumption does it replace the preceding completed range. Parent
+timestamps are excluded from both ranges. The first nonempty native transition
+infers increasing or decreasing reply ranges. Overlap or direction reversal
+fails closed without filtering potentially unseen replies. Empty advancing
+pages retain the last completed range and direction. Full-page chronological
+and thread-identity checks precede slicing. Repeated parents and same-page
+timestamps are filtered without caching content. Plain requests reserve one
+item of the 100-message raw cap for an extra parent. An immediate repeated
+native cursor fails. No hidden paging loop is performed. Inclusive/time-filtered reads used for attachment proofs
 keep their strict per-request count bound. Thread cursor versions separate this
 transport state from legacy native cursors while preserving the existing local
 profile, generation, workspace and query bindings.

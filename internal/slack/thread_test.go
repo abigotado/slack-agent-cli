@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -21,10 +22,10 @@ func threadFixture(count int) []Message {
 	return messages
 }
 
-func TestThreadNativePagesAndOverlap(t *testing.T) {
+func TestThreadForwardNativePagesAndEmptyAdvance(t *testing.T) {
 	t.Parallel()
 	// Refetch the oversized first page, then advance Slack's cursor. Repeated
-	// parents and overlapping replies on subsequent native pages are filtered.
+	// parents are filtered, while page-local overflow is consumed before advancing.
 	pages := []struct {
 		cursor string
 		items  []Message
@@ -33,7 +34,7 @@ func TestThreadNativePagesAndOverlap(t *testing.T) {
 	}{
 		{"", threadFixture(3), "second", []string{"1.000001", "2.000001"}},
 		{"", threadFixture(3), "second", []string{"3.000001"}},
-		{"second", append(threadFixture(1), threadFixture(5)[2:]...), "third", []string{"4.000001", "5.000001"}},
+		{"second", append(threadFixture(1), threadFixture(5)[3:]...), "third", []string{"4.000001", "5.000001"}},
 		{"third", threadFixture(1), "fourth", nil},
 		{"fourth", nil, "", nil},
 	}
@@ -70,6 +71,21 @@ func TestThreadNativePagesAndOverlap(t *testing.T) {
 			}
 		}
 		continuation = page.NextCursor
+		if index < len(pages)-1 {
+			var state threadContinuation
+			if err := json.Unmarshal([]byte(continuation), &state); err != nil {
+				t.Fatal(err)
+			}
+			if index == 0 && (state.PreviousMin != "" || state.After != "2.000001") {
+				t.Fatalf("advanced before consuming overflow: %+v", state)
+			}
+			if index == 1 && (state.After != "" || state.PreviousMin != "2.000001" || state.PreviousMax != "3.000001") {
+				t.Fatalf("did not reset page frontier: %+v", state)
+			}
+			if index == 3 && (state.Direction != 1 || state.PreviousMin != "4.000001" || state.PreviousMax != "5.000001") {
+				t.Fatalf("empty page lost completed range: %+v", state)
+			}
+		}
 		if (index < len(pages)-1) != (continuation != "") {
 			t.Fatalf("page %d unexpected continuation=%q", index, continuation)
 		}
@@ -92,6 +108,7 @@ func TestThreadValidatesWholeRawPage(t *testing.T) {
 		{name: "unordered overflow", items: []Message{{TS: "1.000001"}, {TS: "3.0", ThreadTS: "1.000001"}, {TS: "2.0", ThreadTS: "1.000001"}}, code: "SLACK_RESPONSE_INVALID"},
 		{name: "numeric duplicate", items: []Message{{TS: "1.000001"}, {TS: "2.0", ThreadTS: "1.000001"}, {TS: "2.00", ThreadTS: "1.000001"}}, code: "SLACK_RESPONSE_INVALID"},
 		{name: "parent thread mismatch", items: []Message{{TS: "1.000001", ThreadTS: "9.0"}}, code: "SLACK_RESPONSE_INVALID"},
+		{name: "numeric parent alias on continuation", items: []Message{{TS: "1.0000010", ThreadTS: "1.000001"}}, cursor: "native", code: "SLACK_RESPONSE_INVALID"},
 		{name: "raw hard cap", items: threadFixture(101), code: "SLACK_RESPONSE_COUNT_EXCEEDED"},
 		{name: "repeated native cursor", items: threadFixture(2), cursor: "same", next: "same", code: "SLACK_RESPONSE_INVALID"},
 		{name: "invalid native cursor", items: threadFixture(2), next: "bad\ncursor", code: "SLACK_RESPONSE_INVALID"},
@@ -118,7 +135,10 @@ func TestThreadLimitBoundsAndDeletedFrontier(t *testing.T) {
 	for _, limit := range []int{1, 100} {
 		t.Run(fmt.Sprint(limit), func(t *testing.T) {
 			items := threadFixture(100)
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if want := strconv.Itoa(min(limit, 99)); r.URL.Query().Get("limit") != want {
+					t.Errorf("upstream limit=%q want=%q", r.URL.Query().Get("limit"), want)
+				}
 				if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "messages": items}); err != nil {
 					t.Error(err)
 				}
@@ -141,6 +161,18 @@ func TestThreadLimitBoundsAndDeletedFrontier(t *testing.T) {
 			if err != nil || len(second.Messages) != 1 || second.Messages[0].TS != "2.000001" {
 				t.Fatalf("after deletion: page=%+v error=%v", second, err)
 			}
+			items = items[1:]
+			third, err := client.Replies(context.Background(), Token("sentinel"), ThreadOptions{ConversationID: "C1", ThreadTS: "1.000001", Limit: limit, PageCursor: second.NextCursor})
+			if err != nil || len(third.Messages) != 1 || third.Messages[0].TS != "3.000001" {
+				t.Fatalf("deleted reply anchor: page=%+v error=%v", third, err)
+			}
+			var state threadContinuation
+			if err := json.Unmarshal([]byte(third.NextCursor), &state); err != nil {
+				t.Fatal(err)
+			}
+			if state.PageMin != "2.000001" {
+				t.Fatalf("lost observed page range after deletion: %+v", state)
+			}
 		})
 	}
 }
@@ -161,7 +193,7 @@ func TestThreadCursorDomains(t *testing.T) {
 	if _, err := client.Replies(context.Background(), Token("sentinel"), ThreadOptions{ConversationID: "C1", ThreadTS: "1.000001", Limit: 50, Cursor: legacy}); err != nil {
 		t.Fatal(err)
 	}
-	for _, invalid := range []string{"{}", legacy + " ", `{"v":2,"upstream":"x","after":""}`, `{"v":1,"upstream":"","after":""}`, strings.Repeat("x", 16385)} {
+	for _, invalid := range []string{"{}", legacy, legacy + " ", `{"v":2,"upstream":"x","after":""}`, `{"v":1,"upstream":"","after":""}`, strings.Repeat("x", 16385)} {
 		_, err := client.Replies(context.Background(), Token("sentinel"), ThreadOptions{ConversationID: "C1", ThreadTS: "1.000001", Limit: 50, PageCursor: invalid})
 		if err == nil || errx.As(err).Code != "INVALID_CURSOR" {
 			t.Fatalf("accepted invalid continuation: %v", err)
@@ -215,7 +247,7 @@ func TestThreadContinuationGuardsBeforeDispatch(t *testing.T) {
 		t.Error("invalid continuation dispatched a request")
 		return nil, fmt.Errorf("unexpected dispatch")
 	})})
-	continuation := `{"v":1,"upstream":"native","after":"2.000001"}`
+	continuation := `{"v":2,"upstream":"native","after":"2.000001","previous_min":"","previous_max":"","page_min":"2.000001","page_max":"3.000001","direction":0}`
 	for _, options := range []ThreadOptions{
 		{Cursor: "native", PageCursor: continuation},
 		{Oldest: "1.0", PageCursor: continuation},
@@ -241,5 +273,76 @@ func TestThreadRejectsOversizedEncodedContinuation(t *testing.T) {
 	page, err := client.Replies(context.Background(), Token("sentinel"), ThreadOptions{ConversationID: "C1", ThreadTS: "1.000001", Limit: 50})
 	if err == nil || errx.As(err).Code != "SLACK_RESPONSE_INVALID" || page.NextCursor != "" || len(page.Messages) != 0 {
 		t.Fatalf("unsafe oversized continuation: page=%+v error=%v", page, err)
+	}
+}
+
+func TestThreadNativeRangeOrder(t *testing.T) {
+	t.Parallel()
+	reply := func(ts string) Message { return Message{TS: ts, ThreadTS: "1.000001"} }
+	parent := Message{TS: "1.000001"}
+	for _, test := range []struct {
+		name       string
+		pages      [][]Message
+		rejectLast bool
+	}{
+		{"descending", [][]Message{{parent, reply("8.0"), reply("9.0")}, {reply("6.0"), reply("7.0")}, {reply("4.0"), reply("5.0")}}, false},
+		{"ascending overlap", [][]Message{{parent, reply("2.0"), reply("3.0")}, {reply("3.0"), reply("4.0")}}, true},
+		{"descending overlap", [][]Message{{parent, reply("4.0"), reply("5.0")}, {reply("3.0"), reply("4.0")}}, true},
+		{"unseen gap inside previous range", [][]Message{{parent, reply("4.0"), reply("8.0")}, {reply("5.0"), reply("7.0")}}, true},
+		{"direction reversal", [][]Message{{parent, reply("8.0"), reply("9.0")}, {reply("6.0"), reply("7.0")}, {reply("10.0"), reply("11.0")}}, true},
+		{"direction after empty page", [][]Message{{parent, reply("8.0"), reply("9.0")}, {reply("6.0"), reply("7.0")}, {parent}, {reply("10.0"), reply("11.0")}}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				index := requests
+				requests++
+				if index >= len(test.pages) {
+					t.Error("unexpected extra request")
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				wantCursor := ""
+				if index > 0 {
+					wantCursor = fmt.Sprintf("page%d", index)
+				}
+				if r.URL.Query().Get("cursor") != wantCursor {
+					t.Errorf("cursor=%q want=%q", r.URL.Query().Get("cursor"), wantCursor)
+				}
+				next := ""
+				if index < len(test.pages)-1 {
+					next = fmt.Sprintf("page%d", index+1)
+				}
+				if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "messages": test.pages[index], "response_metadata": map[string]string{"next_cursor": next}}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			client := newTestClient(server.URL, server.Client())
+			continuation := ""
+			seen := map[string]bool{}
+			for index := range test.pages {
+				page, err := client.Replies(context.Background(), Token("sentinel"), ThreadOptions{ConversationID: "C1", ThreadTS: "1.000001", Limit: 3, PageCursor: continuation})
+				if test.rejectLast && index == len(test.pages)-1 {
+					if err == nil || errx.As(err).Code != "SLACK_RESPONSE_INVALID" || len(page.Messages) != 0 || page.NextCursor != "" {
+						t.Fatalf("accepted overlapping/reversing range: page=%+v error=%v", page, err)
+					}
+					break
+				}
+				if err != nil {
+					t.Fatalf("page%d: %v", index, err)
+				}
+				for _, message := range page.Messages {
+					if seen[message.TS] {
+						t.Fatalf("duplicate timestamp %s", message.TS)
+					}
+					seen[message.TS] = true
+				}
+				continuation = page.NextCursor
+				if (index < len(test.pages)-1) != (continuation != "") {
+					t.Fatalf("unexpected next cursor on page%d", index)
+				}
+			}
+		})
 	}
 }

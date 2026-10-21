@@ -58,67 +58,93 @@ func TestThreadWithoutLimitPaginatesOversizedSlackPage(t *testing.T) {
 		messages[i] = slack.Message{Type: "message", TS: fmt.Sprintf("%d.000001", i+1), ThreadTS: parent, Text: "fixture"}
 	}
 	messages[0].ReplyCount = 68
-	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/conversations.info":
-			_, _ = w.Write([]byte(`{"ok":true,"channel":{"id":"C1","is_channel":true,"is_shared":false,"is_ext_shared":false,"is_org_shared":false}}`))
-		case "/api/conversations.replies":
-			requests++
-			if r.URL.Query().Get("limit") != "50" || r.URL.Query().Get("cursor") != "" {
-				t.Errorf("unexpected Slack pagination query: %v", r.URL.Query())
+	for _, test := range []struct {
+		name         string
+		first, older []slack.Message
+		counts       []int
+	}{
+		{"single-native-page", messages, nil, []int{50, 19}},
+		{"backward-native-pages", append([]slack.Message{messages[0]}, messages[19:]...), messages[1:19], []int{50, 1, 18}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/conversations.info":
+					_, _ = w.Write([]byte(`{"ok":true,"channel":{"id":"C1","is_channel":true,"is_shared":false,"is_ext_shared":false,"is_org_shared":false}}`))
+				case "/api/conversations.replies":
+					requests++
+					if r.URL.Query().Get("limit") != "50" {
+						t.Errorf("unexpected limit: %v", r.URL.Query())
+					}
+					items, next := test.first, ""
+					if test.older != nil {
+						next = "older"
+					}
+					switch r.URL.Query().Get("cursor") {
+					case "":
+					case "older":
+						items, next = test.older, ""
+					default:
+						t.Errorf("unexpected native cursor: %v", r.URL.Query())
+					}
+					if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "messages": items, "response_metadata": map[string]string{"next_cursor": next}}); err != nil {
+						t.Error(err)
+					}
+				default:
+					t.Errorf("unexpected route: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			d, stdout := threadCLIDependencies(t, slack.NewTestClient(server.URL, server.Client()))
+			cursor := ""
+			seen := map[string]bool{}
+			for page, want := range test.counts {
+				args := []string{"messages", "thread", "--profile", "work", "--conversation-id", "C1", "--thread-ts", parent}
+				if cursor != "" {
+					args = append(args, "--cursor", cursor)
+				}
+				stdout.Reset()
+				if exit := cli.Run(context.Background(), args, d); exit != errx.OK {
+					t.Fatalf("page %d exit=%d output=%s", page+1, exit, stdout)
+				}
+				var result struct {
+					OK   bool            `json:"ok"`
+					Data []slack.Message `json:"data"`
+					Meta struct {
+						NextCursor   string `json:"next_cursor"`
+						ContentTrust string `json:"content_trust"`
+						Count        int    `json:"count"`
+					} `json:"meta"`
+				}
+				if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				if !result.OK || len(result.Data) != want || result.Meta.Count != want || result.Meta.ContentTrust != "untrusted" {
+					t.Fatalf("unexpected page: %s", stdout)
+				}
+				for _, message := range result.Data {
+					if seen[message.TS] {
+						t.Fatalf("duplicate timestamp: %s", message.TS)
+					}
+					seen[message.TS] = true
+				}
+				cursor = result.Meta.NextCursor
+				if (page < len(test.counts)-1) != (cursor != "") {
+					t.Fatalf("unexpected continuation on page %d", page+1)
+				}
 			}
-			// Slack's oversized page must be resumed rather than silently truncated.
-			if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "messages": messages}); err != nil {
-				t.Error(err)
+			if len(seen) != 69 || !seen[parent] || requests != len(test.counts) {
+				t.Fatalf("lost messages or excess requests: unique=%d requests=%d", len(seen), requests)
 			}
-		default:
-			t.Errorf("unexpected route: %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-	client := slack.NewTestClient(server.URL, server.Client())
-	d, stdout := threadCLIDependencies(t, client)
-	cursor := ""
-	seen := map[string]bool{}
-	for page, want := range []int{50, 19} {
-		args := []string{"messages", "thread", "--profile", "work", "--conversation-id", "C1", "--thread-ts", parent}
-		if cursor != "" {
-			args = append(args, "--cursor", cursor)
-		}
-		stdout.Reset()
-		if exit := cli.Run(context.Background(), args, d); exit != errx.OK {
-			t.Fatalf("page %d exit=%d output=%s", page+1, exit, stdout)
-		}
-		var result struct {
-			OK   bool            `json:"ok"`
-			Data []slack.Message `json:"data"`
-			Meta struct {
-				NextCursor   string `json:"next_cursor"`
-				ContentTrust string `json:"content_trust"`
-				Count        int    `json:"count"`
-			} `json:"meta"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-			t.Fatal(err)
-		}
-		if !result.OK || len(result.Data) != want || result.Meta.Count != want || result.Meta.ContentTrust != "untrusted" {
-			t.Fatalf("unexpected page: %s", stdout)
-		}
-		for _, message := range result.Data {
-			if seen[message.TS] {
-				t.Fatalf("duplicate timestamp: %s", message.TS)
+			for _, message := range messages {
+				if !seen[message.TS] {
+					t.Fatalf("lost timestamp: %s", message.TS)
+				}
 			}
-			seen[message.TS] = true
-		}
-		cursor = result.Meta.NextCursor
-		if (page == 0) != (cursor != "") {
-			t.Fatalf("unexpected continuation on page %d", page+1)
-		}
-	}
-	if len(seen) != 69 || !seen[parent] || requests != 2 {
-		t.Fatalf("lost messages or excess requests: unique=%d requests=%d", len(seen), requests)
+		})
 	}
 }
 

@@ -39,7 +39,11 @@ All public paginated commands (`conversations list`, `messages history`, and
 1-100. The first thread page includes the parent; later pages omit previously
 emitted timestamps. Each output page contains at most the requested limit.
 Oversized native thread pages up to the fixed 100-message transport bound are
-resumed by refetching the same page before advancing Slack's cursor. Above 100
+resumed by refetching the same page before advancing Slack's cursor. Its
+timestamp frontier resets at native transitions, which may lead to older or
+newer replies. Native reply ranges must remain disjoint in their inferred
+direction; overlapping ranges or a reversal fail with `SLACK_RESPONSE_INVALID`
+at exit 1. Above 100
 still fails with `SLACK_RESPONSE_COUNT_EXCEEDED` and exit 1. History/list and
 attachment-proof count bounds remain strict. Follow opaque `meta.next_cursor`
 only as needed, including after an empty page. Pagination is not a snapshot of
