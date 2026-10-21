@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/abigotado/slack-agent-cli/internal/contract"
 	"github.com/abigotado/slack-agent-cli/internal/errx"
 )
 
@@ -186,5 +187,59 @@ func TestTimeFilteredThreadKeepsStrictBound(t *testing.T) {
 		if err == nil || errx.As(err).Code != "SLACK_RESPONSE_COUNT_EXCEEDED" {
 			t.Fatalf("filtered proof bound changed: %v", err)
 		}
+	}
+}
+
+func TestThreadRejectsReplyTimestampAsInput(t *testing.T) {
+	t.Parallel()
+	for _, items := range [][]Message{threadFixture(3), threadFixture(1)} {
+		t.Run(fmt.Sprint(len(items)), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "messages": items}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			client := newTestClient(server.URL, server.Client())
+			_, err := client.Replies(context.Background(), Token("sentinel"), ThreadOptions{ConversationID: "C1", ThreadTS: "2.000001", Limit: 1})
+			if err == nil || errx.As(err).Code != "THREAD_PARENT_REQUIRED" || errx.ProcessExit(err) != errx.Usage {
+				t.Fatalf("wrong parent error: %v", err)
+			}
+		})
+	}
+}
+
+func TestThreadContinuationGuardsBeforeDispatch(t *testing.T) {
+	t.Parallel()
+	client := newTestClient("https://slack.invalid", &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Error("invalid continuation dispatched a request")
+		return nil, fmt.Errorf("unexpected dispatch")
+	})})
+	continuation := `{"v":1,"upstream":"native","after":"2.000001"}`
+	for _, options := range []ThreadOptions{
+		{Cursor: "native", PageCursor: continuation},
+		{Oldest: "1.0", PageCursor: continuation},
+		{Latest: "3.0", PageCursor: continuation},
+		{Inclusive: true, PageCursor: continuation},
+	} {
+		options.Limit, options.ConversationID, options.ThreadTS = 1, "C1", "1.000001"
+		if _, err := client.Replies(context.Background(), Token("sentinel"), options); err == nil || errx.As(err).Code != "INVALID_CURSOR" {
+			t.Fatalf("invalid cursor guard: %v", err)
+		}
+	}
+}
+
+func TestThreadRejectsOversizedEncodedContinuation(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "messages": threadFixture(1), "response_metadata": map[string]string{"next_cursor": strings.Repeat("x", contract.MaxCursorBytes)}}); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	client := newTestClient(server.URL, server.Client())
+	page, err := client.Replies(context.Background(), Token("sentinel"), ThreadOptions{ConversationID: "C1", ThreadTS: "1.000001", Limit: 50})
+	if err == nil || errx.As(err).Code != "SLACK_RESPONSE_INVALID" || page.NextCursor != "" || len(page.Messages) != 0 {
+		t.Fatalf("unsafe oversized continuation: page=%+v error=%v", page, err)
 	}
 }

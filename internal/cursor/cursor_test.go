@@ -1,6 +1,11 @@
 package cursor
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/abigotado/slack-agent-cli/internal/contract"
+)
 
 func TestBindingRejectsCrossProfileAndQuery(t *testing.T) {
 	t.Parallel()
@@ -55,4 +60,28 @@ func TestThreadCursorVersionsAndContext(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestThreadCursorFinalEncodedBound(t *testing.T) {
+	t.Parallel()
+	lastAccepted := 0
+	for size := 1; size <= contract.MaxCursorBytes; size++ {
+		upstream := strings.Repeat("x", size)
+		value, err := BindThread("identity:generation", "T1", "thread", "limit=50", upstream)
+		if err != nil {
+			if value != "" || lastAccepted == 0 {
+				t.Fatalf("unsafe bound failure: size=%d cursor=%q error=%v", size, value, err)
+			}
+			return
+		}
+		if len(value) > contract.MaxCursorBytes {
+			t.Fatalf("emitted oversized cursor: %d", len(value))
+		}
+		got, normalized, err := UnbindThread(value, "identity:generation", "T1", "thread", "limit=50")
+		if err != nil || !normalized || got != upstream {
+			t.Fatalf("size=%d cannot round trip: %v", size, err)
+		}
+		lastAccepted = size
+	}
+	t.Fatal("accepted every payload without accounting for encoding overhead")
 }

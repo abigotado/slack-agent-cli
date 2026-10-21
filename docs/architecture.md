@@ -62,6 +62,9 @@ all packages -> errx (leaf)
 `internal/slack` receives an already selected credential and may not import
 `auth` or `profile`. `internal/cli` may not import `net/http`. Production
 Slack origin and route paths are constants, and no raw API escape hatch exists.
+The end-to-end thread fixture uses an external test package and a constructor
+defined only in `_test.go`; its HTTP server and cross-layer test imports do
+not enter production builds.
 
 The supported network matrix is:
 

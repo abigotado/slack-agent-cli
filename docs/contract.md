@@ -64,6 +64,13 @@ An opaque pagination cursor is bound to the complete profile identity (including
 credential generation), workspace, operation, and normalized query; it cannot
 be reused after an account/profile transition.
 
+`--thread-ts` requires the parent timestamp. A coherent initial page identifying
+an earlier parent returns `THREAD_PARENT_REQUIRED` at exit 2 with guidance to
+use the message's `thread_ts`. Malformed, unordered, duplicate or wrong-thread
+pages and invalid/non-progressing native cursors return `SLACK_RESPONSE_INVALID`
+at exit 1. Stop that pagination chain and report the response violation; do not
+interpret it as an empty thread or retry the same cursor automatically.
+
 Thread continuations use a private cursor encoding distinct from legacy native
 cursors. Existing v1 bound thread cursors remain accepted as native cursors;
 other commands keep their existing cursor encoding. The public JSON envelope

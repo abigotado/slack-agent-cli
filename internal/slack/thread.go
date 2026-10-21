@@ -72,7 +72,15 @@ func readThreadContinuation(options ThreadOptions) (threadContinuation, error) {
 }
 
 func validateThreadMessages(messages []Message, parent string, initial bool) error {
-	if !validThreadTimestamp(parent) || (initial && (len(messages) == 0 || messages[0].TS != parent)) {
+	if !validThreadTimestamp(parent) {
+		return invalidThreadPage()
+	}
+	if initial && (len(messages) == 0 || messages[0].TS != parent) {
+		if len(messages) > 0 && validThreadTimestamp(messages[0].TS) &&
+			compareThreadTimestamps(messages[0].TS, parent) < 0 &&
+			validateThreadMessages(messages, messages[0].TS, false) == nil {
+			return errx.New(errx.Usage, "THREAD_PARENT_REQUIRED", "--thread-ts must identify the thread parent", "read the message and use its thread_ts as --thread-ts")
+		}
 		return invalidThreadPage()
 	}
 	for index, message := range messages {
