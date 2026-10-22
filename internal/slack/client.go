@@ -187,6 +187,12 @@ func (c *Client) Replies(ctx context.Context, token Token, options ThreadOptions
 	if err := validateRequestedLimit(options.Limit); err != nil {
 		return MessagePage{}, err
 	}
+	if options.Oldest == "" && options.Latest == "" && !options.Inclusive {
+		return c.threadPage(ctx, token, options)
+	}
+	if options.PageCursor != "" {
+		return MessagePage{}, invalidThreadCursor()
+	}
 	values := url.Values{"channel": {options.ConversationID}, "ts": {options.ThreadTS}, "limit": {strconv.Itoa(options.Limit)}}
 	if options.Cursor != "" {
 		values.Set("cursor", options.Cursor)

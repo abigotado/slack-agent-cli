@@ -58,10 +58,10 @@ prebuilt executable or invoke `/usr/bin/security`.
 
 ### Go
 
-Go 1.26.9 or newer:
+Go 1.26.10 or newer:
 
 ```sh
-go install github.com/abigotado/slack-agent-cli/cmd/slack-agent-cli@v0.3.1
+go install github.com/abigotado/slack-agent-cli/cmd/slack-agent-cli@v0.3.2
 slack-agent-cli version
 ```
 
@@ -116,6 +116,21 @@ slack-agent-cli auth list
 slack-agent-cli auth status --profile bangr
 slack-agent-cli auth status --profile bangr --check
 ```
+
+If Slack returns `SLACK_AUTH_REJECTED`, it rejected the credential used by that
+request. This normalized error does not identify whether it was revoked,
+expired, or otherwise invalid. A rejected login leaves the stored credential
+unchanged. Do not infer the cause from a token prefix, a guessed token length,
+or an earlier clipboard check.
+
+Obtain the application's **User OAuth Token** from
+[Slack Apps](https://api.slack.com/apps) → the application installed in the
+intended workspace → **OAuth & Permissions**. Enter it in your own terminal
+using `--token-tty`; never paste it into a chat. If no user token is available,
+check the application's installation and user scopes before changing anything.
+Token reimport changes the credential generation, so existing policies require
+reviewed replacement as described below. Do not automatically reinstall an app,
+change token rotation, or reset policies in response to this generic error.
 
 ### Agent profile selection
 
@@ -210,9 +225,18 @@ exact read IDs. Rebuild the write policy afterwards.
 `conversations list`, `messages history`, and `messages thread` default to
 `--limit 50`. An explicit limit must be from 1 through 100; `0`, negative values,
 and values above 100 fail with `INVALID_LIMIT` and exit 2. Follow the opaque
-`meta.next_cursor` only while the task requires more data. A thread page includes
-the parent and replies returned by Slack; check for a cursor before assuming the
-thread is complete.
+`meta.next_cursor` only while the task requires more data. The first thread page
+includes the parent; following pages contain remaining replies without repeating
+previously emitted timestamps. Every output page contains at most the requested
+limit. If Slack returns extra messages, the cursor resumes that native page
+before advancing to the next one. This may refetch a page; it is not a snapshot
+of a concurrently changing thread. Native pages may run towards older or newer
+replies. Overlapping native ranges or a change in their direction fails with
+`SLACK_RESPONSE_INVALID` at exit 1, with a hint to restart the thread read once
+from the first page without `--cursor`. If it happens again, stop and report it.
+A raw Slack page above the fixed 100-message transport bound still fails with
+`SLACK_RESPONSE_COUNT_EXCEEDED` and exit 1.
+Check for a cursor before assuming the thread is complete.
 
 ```sh
 slack-agent-cli conversations list \
