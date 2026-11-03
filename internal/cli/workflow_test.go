@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/abigotado/slack-agent-cli/internal/auth"
@@ -270,7 +271,9 @@ func TestWorkflowApprovedSendAndUnknownOutcomeAreOneShot(t *testing.T) {
 				api.postErr = errx.New(errx.Conflict, "WRITE_OUTCOME_UNKNOWN", "unknown", "reconcile; never resend")
 			}
 			if test.reconcile {
-				api.messages = slack.MessagePage{Messages: []slack.Message{{TS: "1234567890.123456", User: "U1", Text: "approved body"}}}
+				api.postHook = func(slack.PostOptions) {
+					api.messages = slack.MessagePage{Messages: []slack.Message{{TS: fmt.Sprintf("%.6f", float64(time.Now().UnixMicro())/1e6), User: "U1", Text: "approved body"}}}
+				}
 			}
 			deps.Input = strings.NewReader("approved body")
 			if exit := runWorkflow(context.Background(), []string{"workflow", "send", "--profile", "work", "--target", "C1", "--text-stdin", "--approved-intent", digest, "--yes", "--user-requested"}, deps); exit != test.want {
@@ -574,5 +577,88 @@ func TestWorkflowReadRequiresResolverBinding(t *testing.T) {
 	}
 	if decodeEnvelope(t, out)["error"].(map[string]any)["code"] != "PROFILE_BINDING_REQUIRED" || store.loads != 0 || len(api.calls) != 0 {
 		t.Fatalf("effects stdout=%s loads=%d calls=%v", out, store.loads, api.calls)
+	}
+}
+
+func TestWorkflowGenerationOnlyRotationRejectsOldResolverBinding(t *testing.T) {
+	t.Parallel()
+	for _, operation := range []string{"read", "preview", "send"} {
+		t.Run(operation, func(t *testing.T) {
+			deps, store, api, out, p := workflowFixture(t)
+			if exit := Run(context.Background(), []string{"workflow", "resolve", "--target", "C1", "--operation", "read"}, deps); exit != errx.OK {
+				t.Fatal(exit)
+			}
+			binding := decodeEnvelope(t, out)["data"].(map[string]any)["profile_binding"].(string)
+			digest := previewWorkflow(t, deps, out, "C1", "approved body")
+			p.CredentialGeneration = "g2"
+			if profile.Identity(p) == binding {
+				t.Fatal("complete profile identity did not pin generation")
+			}
+			if err := deps.Profiles.Put(context.Background(), p); err != nil {
+				t.Fatal(err)
+			}
+			// Simulate an already rebuilt current policy, so only the resolver pin can stop this.
+			if _, err := deps.Policies.Add(context.Background(), p, policy.Write, policy.Target{ConversationID: "C1"}); err != nil {
+				t.Fatal(err)
+			}
+			out.Reset()
+			deps.Input = strings.NewReader("approved body")
+			args := []string{"workflow", operation, "--profile", "work", "--profile-binding", binding, "--target", "C1"}
+			switch operation {
+			case "read":
+				args = append(args, "--user-requested")
+			case "preview":
+				args = append(args, "--text-stdin")
+			case "send":
+				args = append(args, "--text-stdin", "--approved-intent", digest, "--yes", "--user-requested")
+			}
+			if exit := Run(context.Background(), args, deps); exit != errx.Conflict {
+				t.Fatalf("exit=%d output=%s", exit, out)
+			}
+			if decodeEnvelope(t, out)["error"].(map[string]any)["code"] != "PROFILE_CHANGED" || store.loads != 0 || len(api.calls) != 0 {
+				t.Fatalf("effects output=%s loads=%d calls=%v", out, store.loads, api.calls)
+			}
+		})
+	}
+}
+
+func TestWorkflowThreadReconciliationCannotProveOldOrIncompleteMatches(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		age    time.Duration
+		cursor string
+		want   errx.Exit
+	}{
+		{name: "old identical reply", age: -time.Hour, want: errx.Conflict},
+		{name: "fresh but incomplete page", cursor: "unseen-replies", want: errx.Conflict},
+		{name: "fresh complete match", want: errx.OK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			deps, _, api, out, _ := workflowFixture(t)
+			target := "https://example.slack.com/archives/C1/p1234567890123456"
+			digest := previewWorkflow(t, deps, out, target, "approved body")
+			api.replyPages = []slack.MessagePage{{Messages: []slack.Message{{TS: "1234567890.123456"}}}, {}}
+			api.postErr = errx.New(errx.Conflict, "WRITE_OUTCOME_UNKNOWN", "unknown", "reconcile; never resend")
+			api.postHook = func(slack.PostOptions) {
+				api.replyPages[0] = slack.MessagePage{Messages: []slack.Message{{TS: fmt.Sprintf("%.6f", float64(time.Now().Add(test.age).UnixMicro())/1e6), ThreadTS: "1234567890.123456", User: "U1", Text: "approved body"}}, NextCursor: test.cursor}
+			}
+			deps.Input = strings.NewReader("approved body")
+			if exit := runWorkflow(context.Background(), []string{"workflow", "send", "--profile", "work", "--target", target, "--text-stdin", "--approved-intent", digest, "--yes", "--user-requested"}, deps); exit != test.want {
+				t.Fatalf("exit=%d output=%s", exit, out)
+			}
+			posts := 0
+			for _, call := range api.calls {
+				if call == "chat.postMessage" {
+					posts++
+				}
+			}
+			if posts != 1 {
+				t.Fatalf("posts=%d calls=%v", posts, api.calls)
+			}
+			if test.want == errx.Conflict && decodeEnvelope(t, out)["error"].(map[string]any)["code"] != "WRITE_OUTCOME_UNKNOWN" {
+				t.Fatalf("lost unknown outcome: %s", out)
+			}
+		})
 	}
 }

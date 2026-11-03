@@ -115,6 +115,12 @@ only this emergency marker for that failure:
 SLACK_AGENT_CLI_CONFIRMED_WRITE_OUTPUT_FAILURE
 ```
 
+Reconciliation accepts a matching message only from dispatch time through two
+minutes afterwards and only when the bounded page has no further cursor. An
+older identical message or incomplete page cannot prove success; the outcome
+remains unknown without another post. Clock skew can conservatively prevent a
+match and requires user-directed investigation, never an automatic resend.
+
 ## File reads
 
 `files get FILE_ID --profile NAME --conversation-id ID --message-ts TS`

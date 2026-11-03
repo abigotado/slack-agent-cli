@@ -19,8 +19,11 @@ are setup or selection problems, not routine approval prompts.
 | Send exact user-supplied text to an exact recipient on explicit instruction | Up to 4 redundant questions when profile/policies were missing | Show recipient/text, 0 additional consent questions |
 
 Unresolved profile ambiguity adds one account-selection question. Changing the
-approved text, conversation, thread or profile requires fresh consent. A
-credential-generation change also invalidates the approval. A missing target
+approved text, conversation or thread requires fresh consent. A changed
+account/workspace must be reviewed as part of the recipient. Credential
+generation changes invalidate the technical binding and stop the operation,
+without revoking unchanged human recipient/text consent. Never automatically
+retry a send or silently reset stale policy. A missing target
 or final text still needs the missing information.
 
 ## Commands and responsibility

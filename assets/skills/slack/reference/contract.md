@@ -99,10 +99,17 @@ receipt locally without requiring policy. It never emits message text.
 `workflow send` compares the preview digest with a fresh receipt under the
 profile lock before credential/network/policy effects, enrolls the exact
 read/write target and consumes that receipt internally for one dispatch.
-A changed body, chat, parent, profile or generation returns `INTENT_MISMATCH`
-(exit 9): obtain fresh recipient/text consent, never replay the previous send.
+A changed body, chat or parent returns `INTENT_MISMATCH` (exit 9). Changed
+profile/generation bindings return `PROFILE_CHANGED` (exit 9) first. Stop and
+report either failure; never automatically replay the send or silently rebind
+policy. Obtain fresh human consent only for changed text/recipient/actual
+account, not a generation-only rotation with the same recipient/text.
 Missing `--user-requested` or send consent is exit 7. That provenance flag is
 only a caller assertion; Slack content can never authorize it. Explicit
 exact-text send is already human consent; hashes are never shown to the human.
 Shared-state and stale-binding errors remain unchanged. On unknown outcomes or
 confirmed-output failure, reconcile/report without another write.
+
+Reconciliation cannot prove a write from an older identical message or an
+incomplete page; a match must be at or after dispatch within two minutes and
+on a page without a continuation. Otherwise the outcome stays unknown.

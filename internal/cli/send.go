@@ -198,7 +198,17 @@ func reconcileMessage(ctx context.Context, dependencies Dependencies, current se
 	}
 	matches := make([]slack.Message, 0, 1)
 	digest := intent.DigestText(text)
+	earliest := float64(dispatchedAt.UnixMicro()) / 1e6
+	latest := float64(dispatchedAt.Add(2*time.Minute).UnixMicro()) / 1e6
 	for _, message := range messages {
+		if validateTimestamp(message.TS, "Slack message timestamp") != nil {
+			continue
+		}
+		timestamp, err := strconv.ParseFloat(message.TS, 64)
+		// An older identical message cannot prove that this dispatch was applied.
+		if err != nil || timestamp < earliest || timestamp > latest {
+			continue
+		}
 		authorMatch := message.User == current.profile.UserID || (current.profile.BotID != "" && message.BotID == current.profile.BotID)
 		threadMatch := message.ThreadTS == options.threadTS
 		if options.threadTS == "" {
@@ -219,13 +229,13 @@ func reconciliationMessages(ctx context.Context, dependencies Dependencies, curr
 		oldest := strconv.FormatInt(dispatchedAt.Add(-2*time.Minute).Unix(), 10)
 		latest := strconv.FormatInt(dispatchedAt.Add(2*time.Minute).Unix(), 10)
 		page, err := dependencies.Messages.History(ctx, current.token, slack.HistoryOptions{ConversationID: options.conversationID, Limit: contract.MaxCollectionLimit, Oldest: oldest, Latest: latest})
-		if err != nil {
+		if err != nil || page.NextCursor != "" {
 			return nil, false
 		}
 		return page.Messages, true
 	}
 	page, err := dependencies.Messages.Replies(ctx, current.token, slack.ThreadOptions{ConversationID: options.conversationID, ThreadTS: options.threadTS, Limit: contract.MaxCollectionLimit})
-	if err != nil {
+	if err != nil || page.NextCursor != "" {
 		return nil, false
 	}
 	return page.Messages, true

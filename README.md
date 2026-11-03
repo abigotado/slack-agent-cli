@@ -154,7 +154,9 @@ any parent thread. After one recipient/text consent, `workflow send` uses its
 internal digest to create a fresh dry-run receipt, add the exact read/write
 policy and send once. An explicit request to send exact text to an exact target
 already supplies that consent. Humans see recipient/text, never hashes. Changed
-text/recipient/profile/generation requires fresh consent. These commands are
+text/recipient requires fresh consent. Profile/generation drift stops the
+operation for review; generation-only rotation does not require duplicate
+recipient/text consent. These commands are
 available in source; the Skill includes a legacy bridge for installed 0.3.2.
 See [workflow behavior and question audit](docs/workflows.md) for commands,
 trusted-caller limitations and the existing-target-only legacy bridge.

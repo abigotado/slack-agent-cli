@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abigotado/slack-agent-cli/internal/auth"
 	"github.com/abigotado/slack-agent-cli/internal/errx"
@@ -52,6 +53,7 @@ type fakeSlack struct {
 	calls          []string
 	postResult     slack.PostResult
 	postErr        error
+	postHook       func(slack.PostOptions)
 }
 
 func (s *fakeSlack) AuthTest(context.Context, slack.Token) (slack.Identity, error) {
@@ -91,6 +93,9 @@ func (s *fakeSlack) UserInfo(_ context.Context, _ slack.Token, id string) (slack
 }
 func (s *fakeSlack) PostMessage(_ context.Context, _ slack.Token, options slack.PostOptions) (slack.PostResult, error) {
 	s.calls = append(s.calls, "chat.postMessage")
+	if s.postHook != nil {
+		s.postHook(options)
+	}
 	if s.postErr != nil {
 		return slack.PostResult{}, s.postErr
 	}
@@ -991,7 +996,9 @@ func TestUnknownWriteReconcilesWithoutRetry(t *testing.T) {
 	no := false
 	api.conversation = slack.Conversation{ID: "C1", IsShared: &no, IsExtShared: &no, IsOrgShared: &no}
 	api.postErr = errx.New(errx.Conflict, "WRITE_OUTCOME_UNKNOWN", "unknown", "reconcile")
-	api.messages = slack.MessagePage{Messages: []slack.Message{{User: "U1", Text: "hello", TS: "2.0"}}}
+	api.postHook = func(slack.PostOptions) {
+		api.messages = slack.MessagePage{Messages: []slack.Message{{User: "U1", Text: "hello", TS: fmt.Sprintf("%.6f", float64(time.Now().UnixMicro())/1e6)}}}
+	}
 	dependencies.Input = bytes.NewBufferString("hello")
 	if exit := Run(context.Background(), []string{"messages", "send", "--profile", "work", "--conversation-id", "C1", "--text-stdin", "--dry-run"}, dependencies); exit != errx.OK {
 		t.Fatal(exit)

@@ -53,7 +53,9 @@ using the same target/profile/limit. No read or enrollment confirmation is neede
    --approved-intent DIGEST --yes --user-requested` with the same bytes and
    preview digest. The CLI validates approval, creates a fresh dry-run receipt,
    enrolls the target and sends once. Do not ask about the internal receipt/hash.
-   Identity/generation changes require a fresh resolve, preview and consent too.
+   On identity/generation mismatch, stop and report the changed state; never
+   silently switch, rebind policy or retry a send. A generation-only rotation
+   does not revoke the user's unchanged recipient/text consent.
 
 Never retry a write automatically. Exit 9 or `WRITE_OUTCOME_UNKNOWN` means
 bounded read-only reconciliation and reporting to the user, never another send.

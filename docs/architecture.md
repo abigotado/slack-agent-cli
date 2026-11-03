@@ -232,6 +232,12 @@ Transport, timeout, server, or malformed-success conditions that might have
 applied the write become `WRITE_OUTCOME_UNKNOWN` at exit 9. One bounded read
 may prove the exact message; the CLI never sends it again automatically.
 
+Reconciliation accepts a matching message only from dispatch time through two
+minutes afterwards and only when the bounded page has no further cursor. An
+older identical message or incomplete page cannot prove success; the outcome
+remains unknown without another post. Clock skew can conservatively prevent a
+match and requires user-directed investigation, never an automatic resend.
+
 ## Agent Skills
 
 The installer exposes a closed set of two embedded Skills and writes their
