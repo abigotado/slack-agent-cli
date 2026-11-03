@@ -110,6 +110,6 @@ exact-text send is already human consent; hashes are never shown to the human.
 Shared-state and stale-binding errors remain unchanged. On unknown outcomes or
 confirmed-output failure, reconcile/report without another write.
 
-Reconciliation cannot prove a write from an older identical message or an
-incomplete page; a match must be at or after dispatch within two minutes and
-on a page without a continuation. Otherwise the outcome stays unknown.
+Reconciliation is diagnostic-only. A matching candidate may be reported in the
+bounded error hint, but even a fresh identical message can belong to another
+client; preserve `WRITE_OUTCOME_UNKNOWN` and never resend automatically.

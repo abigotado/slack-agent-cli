@@ -63,7 +63,8 @@ receipt with the existing confirmed-send core. The lock covers validation,
 credential loading, enrollment, preflight and dispatch. A changed intent fails
 before credential, policy or network effects. The existing write path rechecks
 identity/shared state/thread and dispatches once; unknown outcomes reconcile
-through a bounded read, never another post.
+diagnostically through a bounded read, never another post or an uncorrelated
+success claim. A matching message may belong to another client; exit 9 remains.
 
 All orchestration is typed in-process calls. There are no nested CLI processes
 or nested envelopes to parse. `output.Writer` already enforces the v1 envelope

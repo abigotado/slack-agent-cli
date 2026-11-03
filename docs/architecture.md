@@ -230,13 +230,18 @@ trusted one. Fetched Slack content is never interpreted as workflow input.
 
 Transport, timeout, server, or malformed-success conditions that might have
 applied the write become `WRITE_OUTCOME_UNKNOWN` at exit 9. One bounded read
-may prove the exact message; the CLI never sends it again automatically.
+may identify a candidate for user investigation; it cannot prove which request
+created the message. The CLI preserves the unknown outcome and never sends
+again automatically.
 
-Reconciliation accepts a matching message only from dispatch time through two
-minutes afterwards and only when the bounded page has no further cursor. An
-older identical message or incomplete page cannot prove success; the outcome
-remains unknown without another post. Clock skew can conservatively prevent a
-match and requires user-directed investigation, never an automatic resend.
+Reconciliation is diagnostic-only: author, thread, text and timestamps do not
+correlate a message to this particular HTTP request. Even a fresh unique match
+can belong to another client using the same Slack account. A matching candidate
+may be reported in the bounded error hint, but `WRITE_OUTCOME_UNKNOWN` stays
+exit 9 and is never promoted to `applied:true` without a confirmed API result.
+Only complete bounded pages and timestamps within the dispatch window are
+considered for diagnostics. Clock skew or an incomplete page can reduce the
+available evidence. Never resend automatically.
 
 ## Agent Skills
 

@@ -105,8 +105,9 @@ message text.
 
 The real send requires the same stdin plus `--confirm-intent SHA256 --yes`.
 After dispatch begins, unknown HTTP/API/transport outcomes are exit 9. The CLI
-may perform one bounded reconciliation read; exactly one matching message turns
-the result into success with `meta.reconciled: true`. It never sends again.
+may perform one bounded diagnostic reconciliation read. Matching content does
+not prove causality, so the outcome remains unknown at exit 9. It never sends
+again; a confirmed API acknowledgement is required for success.
 
 If Slack success is confirmed but stdout cannot be delivered, stderr contains
 only this emergency marker for that failure:
@@ -115,11 +116,14 @@ only this emergency marker for that failure:
 SLACK_AGENT_CLI_CONFIRMED_WRITE_OUTPUT_FAILURE
 ```
 
-Reconciliation accepts a matching message only from dispatch time through two
-minutes afterwards and only when the bounded page has no further cursor. An
-older identical message or incomplete page cannot prove success; the outcome
-remains unknown without another post. Clock skew can conservatively prevent a
-match and requires user-directed investigation, never an automatic resend.
+Reconciliation is diagnostic-only: author, thread, text and timestamps do not
+correlate a message to this particular HTTP request. Even a fresh unique match
+can belong to another client using the same Slack account. A matching candidate
+may be reported in the bounded error hint, but `WRITE_OUTCOME_UNKNOWN` stays
+exit 9 and is never promoted to `applied:true` without a confirmed API result.
+Only complete bounded pages and timestamps within the dispatch window are
+considered for diagnostics. Clock skew or an incomplete page can reduce the
+available evidence. Never resend automatically.
 
 ## File reads
 

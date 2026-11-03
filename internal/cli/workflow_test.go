@@ -260,7 +260,7 @@ func TestWorkflowApprovedSendAndUnknownOutcomeAreOneShot(t *testing.T) {
 	}{
 		{name: "new chat approved send", want: errx.OK},
 		{name: "unknown", unknown: true, want: errx.Conflict},
-		{name: "reconciled", unknown: true, reconcile: true, want: errx.OK},
+		{name: "unrelated matching candidate", unknown: true, reconcile: true, want: errx.Conflict},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			deps, _, api, out, p := workflowFixture(t)
@@ -632,7 +632,8 @@ func TestWorkflowThreadReconciliationCannotProveOldOrIncompleteMatches(t *testin
 	}{
 		{name: "old identical reply", age: -time.Hour, want: errx.Conflict},
 		{name: "fresh but incomplete page", cursor: "unseen-replies", want: errx.Conflict},
-		{name: "fresh complete match", want: errx.OK},
+		{name: "unrelated fresh identical post", want: errx.Conflict},
+		{name: "old post appearing fresh under clock skew", age: 30 * time.Second, want: errx.Conflict},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			deps, _, api, out, _ := workflowFixture(t)
@@ -658,6 +659,45 @@ func TestWorkflowThreadReconciliationCannotProveOldOrIncompleteMatches(t *testin
 			}
 			if test.want == errx.Conflict && decodeEnvelope(t, out)["error"].(map[string]any)["code"] != "WRITE_OUTCOME_UNKNOWN" {
 				t.Fatalf("lost unknown outcome: %s", out)
+			}
+		})
+	}
+}
+
+func TestWorkflowPostResponseMustMatchApprovedThread(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, requested, returned string
+		want                      errx.Exit
+	}{
+		{name: "root returned a thread", returned: "1234567890.123456", want: errx.Conflict},
+		{name: "thread missing parent", requested: "1234567890.123456", want: errx.Conflict},
+		{name: "thread wrong parent", requested: "1234567890.123456", returned: "1234567880.000001", want: errx.Conflict},
+		{name: "exact thread acknowledgement", requested: "1234567890.123456", returned: "1234567890.123456", want: errx.OK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			deps, _, api, out, _ := workflowFixture(t)
+			target := "C1"
+			if test.requested != "" {
+				target = "https://example.slack.com/archives/C1/p1234567890123456"
+			}
+			digest := previewWorkflow(t, deps, out, target, "approved body")
+			api.postResult = slack.PostResult{ConversationID: "C1", TS: "1234567891.123456", ThreadTS: test.returned}
+			deps.Input = strings.NewReader("approved body")
+			if exit := runWorkflow(context.Background(), []string{"workflow", "send", "--profile", "work", "--target", target, "--text-stdin", "--approved-intent", digest, "--yes", "--user-requested"}, deps); exit != test.want {
+				t.Fatalf("exit=%d output=%s", exit, out)
+			}
+			posts := 0
+			for _, call := range api.calls {
+				if call == "chat.postMessage" {
+					posts++
+				}
+			}
+			if posts != 1 {
+				t.Fatalf("posts=%d calls=%v", posts, api.calls)
+			}
+			if test.want == errx.Conflict && decodeEnvelope(t, out)["error"].(map[string]any)["code"] != "WRITE_OUTCOME_UNKNOWN" {
+				t.Fatalf("malformed ack confirmed: %s", out)
 			}
 		})
 	}

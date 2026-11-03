@@ -155,7 +155,7 @@ func dispatchMessage(ctx context.Context, dependencies Dependencies, current ses
 	defer cancel()
 	dependencies.WriteState.MarkStarted()
 	result, writeErr := dependencies.Writes.PostMessage(writeContext, current.token, slack.PostOptions{ConversationID: options.conversationID, ThreadTS: options.threadTS, Text: text})
-	if writeErr == nil && (result.ConversationID != options.conversationID || validateTimestamp(result.TS, "Slack response timestamp") != nil) {
+	if writeErr == nil && (result.ConversationID != options.conversationID || result.ThreadTS != options.threadTS || validateTimestamp(result.TS, "Slack response timestamp") != nil) {
 		writeErr = errx.New(errx.Conflict, "WRITE_OUTCOME_UNKNOWN", "Slack write response identity was incomplete", "reconcile with a bounded read; never retry automatically")
 	}
 	if !isUnknownWrite(writeErr) {
@@ -165,7 +165,7 @@ func dispatchMessage(ctx context.Context, dependencies Dependencies, current ses
 	if !ok {
 		return slack.PostResult{}, false, writeErr
 	}
-	return match, true, nil
+	return slack.PostResult{}, false, errx.New(errx.Conflict, "WRITE_OUTCOME_UNKNOWN", "Slack write outcome remains unknown", "bounded reconciliation found a matching candidate at "+match.TS+"; another client may have created it; inspect the conversation and never resend automatically")
 }
 
 func readMessageText(reader io.Reader) (string, error) {
