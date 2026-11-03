@@ -92,39 +92,47 @@ func executeSend(ctx context.Context, dependencies Dependencies, options sendOpt
 }
 
 func executeConfirmedSend(ctx context.Context, dependencies Dependencies, options sendOptions, p profile.Profile, text string, receipt intent.Receipt) error {
+	data, meta, err := confirmedSend(ctx, dependencies, options, p, text, receipt)
+	if err != nil {
+		return err
+	}
+	return dependencies.Output.ConfirmedWriteSuccess(data, meta)
+}
+
+func confirmedSend(ctx context.Context, dependencies Dependencies, options sendOptions, p profile.Profile, text string, receipt intent.Receipt) (map[string]any, *output.Meta, error) {
 	if !options.yes || options.confirmation == "" {
-		return errx.New(errx.ConfirmationRequired, "MESSAGE_CONFIRMATION_REQUIRED", "message send requires the exact dry-run intent", "review the receipt, then pass --confirm-intent SHA256 --yes")
+		return nil, nil, errx.New(errx.ConfirmationRequired, "MESSAGE_CONFIRMATION_REQUIRED", "message send requires the exact dry-run intent", "review the receipt, then pass --confirm-intent SHA256 --yes")
 	}
 	if options.confirmation != receipt.IntentSHA256 {
-		return errx.New(errx.Conflict, "INTENT_MISMATCH", "confirmation does not match the current message intent", "repeat dry-run and review the new receipt")
+		return nil, nil, errx.New(errx.Conflict, "INTENT_MISMATCH", "confirmation does not match the current message intent", "repeat dry-run and review the new receipt")
 	}
 	current, err := loadSession(ctx, dependencies, options.profile, profile.CapabilityMessageWrite)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if profile.Identity(current.profile) != receipt.ProfileIdentity || current.profile.CredentialGeneration != receipt.Generation {
-		return errx.New(errx.Conflict, "PROFILE_CHANGED", "profile changed after dry-run", "repeat dry-run and review the new identity")
+		return nil, nil, errx.New(errx.Conflict, "PROFILE_CHANGED", "profile changed after dry-run", "repeat dry-run and review the new identity")
 	}
 	identity, err := dependencies.Auth.AuthTest(ctx, current.token)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if !identityMatchesProfile(p, identity) {
-		return credentialIdentityChanged()
+		return nil, nil, credentialIdentityChanged()
 	}
 	if _, _, err := preflightTarget(ctx, dependencies, current, options.conversationID, policy.Write); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if err := preflightThread(ctx, dependencies, current, options); err != nil {
-		return err
+		return nil, nil, err
 	}
 	result, reconciled, err := dispatchMessage(ctx, dependencies, current, options, text)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	dependencies.WriteState.MarkConfirmed()
 	applied := map[string]any{"conversation_id": result.ConversationID, "ts": result.TS, "thread_ts": result.ThreadTS, "intent_sha256": receipt.IntentSHA256, "applied": true}
-	return dependencies.Output.ConfirmedWriteSuccess(applied, &output.Meta{Profile: p.Name, WorkspaceID: p.WorkspaceID, Reconciled: &reconciled})
+	return applied, &output.Meta{Profile: p.Name, WorkspaceID: p.WorkspaceID, Reconciled: &reconciled}, nil
 }
 
 func preflightThread(ctx context.Context, dependencies Dependencies, current session, options sendOptions) error {

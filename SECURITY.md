@@ -47,3 +47,12 @@ Message writes are restricted to exact identity-bound conversation IDs. They
 require a local dry-run receipt plus exact confirmation, are dispatched once,
 and return exit 9 when the outcome cannot be proven. Never automatically retry
 such a write.
+
+
+Exact user-request workflows use an explicit caller assertion
+`--user-requested`. The trusted Skill must establish that the user supplied the
+conversation; the CLI cannot authenticate conversational provenance. The user
+request authorizes additive enrollment of that one target and its verified
+shared status. This removes separate policy prompts, not identity, stale-binding,
+shared-state drift, capability, output or one-shot dispatch checks. Send approval
+still binds exact text/recipient/thread/profile/generation before effects.

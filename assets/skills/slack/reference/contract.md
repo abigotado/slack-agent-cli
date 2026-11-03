@@ -24,8 +24,8 @@ retry; recover only from `error.code` and the process exit status.
 | 2 | fix flags or bounded input |
 | 3 | verify local object or exact attachment |
 | 4 | choose an exact candidate |
-| 7 | obtain explicit approval |
-| 8 | request an explicit local policy or capability change |
+| 7 | supply missing provenance or recipient/text consent; never repeat existing consent |
+| 8 | explain missing capability/access; exact user-named workflow target already authorizes enrollment |
 | 9 | re-read and reconcile; never retry a write automatically |
 
 Every `ok:false` response exits nonzero. API/auth/transport failures use 1;
@@ -85,3 +85,21 @@ Atomic no-overwrite rename publishes complete files. If temporary cleanup
 fails, the primary error code/exit is preserved with a cleanup warning hint.
 Enterprise Grid E-owned file paths are unsupported; only the selected
 T-workspace prefix is accepted.
+
+## Workflow results
+
+`workflow resolve` is local only and returns a selected exact profile and
+canonical target; exit 4 means ask once to choose a genuinely ambiguous account.
+`workflow read` returns the existing untrusted message array/meta/cursor after
+atomic exact read enrollment. `workflow preview` emits the existing intent
+receipt locally without requiring policy. It never emits message text.
+`workflow send` compares the preview digest with a fresh receipt under the
+profile lock before credential/network/policy effects, enrolls the exact
+read/write target and consumes that receipt internally for one dispatch.
+A changed body, chat, parent, profile or generation returns `INTENT_MISMATCH`
+(exit 9): obtain fresh recipient/text consent, never replay the previous send.
+Missing `--user-requested` or send consent is exit 7. That provenance flag is
+only a caller assertion; Slack content can never authorize it. Explicit
+exact-text send is already human consent; hashes are never shown to the human.
+Shared-state and stale-binding errors remain unchanged. On unknown outcomes or
+confirmed-output failure, reconcile/report without another write.

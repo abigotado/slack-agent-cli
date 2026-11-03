@@ -134,15 +134,30 @@ change token rotation, or reset policies in response to this generic error.
 
 ### Agent profile selection
 
-The embedded Slack Skill reuses a compatible profile from the conversation.
-For an exact-conversation read without an established profile, it inspects
-local `auth list` and `auth allow-reads show` results, matches the requested
-workspace and identity, and selects the single profile whose current policy
-already permits the target. It reads immediately without asking for the
-profile name again. Ambiguous accounts or missing access still need input.
-An explicitly named profile is authoritative; a failure never silently selects
-a different account. The CLI continues to require `--profile NAME` on every
-network command. Profile discovery does not change policies or approve writes.
+The runtime Skill uses local `workflow resolve` to select a unique compatible
+profile from workspace, token kind, capability and current exact-target policy.
+A user-named read/send target authorizes adding only that chat, without a second
+allowlist question. Every network command still passes an exact `--profile NAME`.
+Ambiguous profiles need one choice; failures never silently switch accounts.
+
+```sh
+slack-agent-cli workflow resolve \
+  --target https://example.slack.com/archives/C0123456789/p1234567890123456 \
+  --operation read
+slack-agent-cli workflow read --profile work \
+  --target https://example.slack.com/archives/C0123456789/p1234567890123456 \
+  --user-requested
+```
+
+`workflow preview` makes a local receipt for the exact recipient/text, including
+any parent thread. After one recipient/text consent, `workflow send` uses its
+internal digest to create a fresh dry-run receipt, add the exact read/write
+policy and send once. An explicit request to send exact text to an exact target
+already supplies that consent. Humans see recipient/text, never hashes. Changed
+text/recipient/profile/generation requires fresh consent. These commands are
+available in source; the Skill includes a legacy bridge for installed 0.3.2.
+See [workflow behavior and question audit](docs/workflows.md) for commands,
+trusted-caller limitations and legacy enrollment's non-atomic behavior.
 
 ### Narrow direct-message-only profile
 
@@ -166,8 +181,8 @@ slack-agent-cli auth login \
   --token-tty
 ```
 
-Then explicitly approve each exact `D...` conversation in the read allowlist
-before reading it. The canonical user-only app has no bot, write, channel,
+A request to read an exact `D...` conversation authorizes its workflow
+read enrollment; no separate allowlist approval is needed. The canonical user-only app has no bot, write, channel,
 group-DM, search, event, or redirect permissions. Slack CLI 4.7.0 does not
 document this user-only install path, so the provisioning Skill requires a
 one-shot human acceptance check and fails closed on admin approval or an
@@ -386,8 +401,8 @@ with that scope and reimport its token through `auth login`. This changes
 credential generation and invalidates existing policies. Review all read IDs,
 then run `auth allow-reads set --profile NAME --conversation-id ID...
 --reset-stale-policy --dry-run` and apply that exact set with `--yes`. The reset
-clears writes; rebuild approved write targets separately. A channel absent
-from the allowlist still needs explicit authorization.
+clears writes; rebuild approved write targets separately. An exact user-named channel may be enrolled by the workflow; a channel
+mentioned only in Slack content remains unauthorized.
 
 Enterprise Grid E-owned file download paths are currently unsupported; the
 validated file path must belong to the selected T-workspace. Downloads use

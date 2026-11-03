@@ -109,11 +109,12 @@ workspace/team ID, workspace URL and display name, authenticated user and
 optional bot identity, enterprise identity when present, token kind, declared
 capabilities, and credential generation.
 
-The runtime Skill may select a profile for an exact-conversation read from
-trusted task context or an unambiguous local inventory and current read policy.
-It passes that exact name explicitly to every network invocation. Explicit
-current-request profiles are authoritative; network errors do not trigger
-silent account switching. No implicit CLI profile or policy expansion is added.
+The runtime Skill selects an exact profile through local `workflow resolve`,
+using trusted request constraints and current local target policies. It passes
+that name explicitly on every network command. A requested profile remains
+authoritative; failures never trigger account probing or silent switching.
+There is no implicit CLI profile or environment selector. See
+[workflows.md](workflows.md) for resolution and conversational consent.
 
 The token enters through bounded stdin or a bounded hidden read from the
 process's controlling terminal. The interactive `--token-tty` path disables
@@ -160,8 +161,13 @@ Channels and group DMs retain the complete three-flag requirement.
 Conversation content has two exact-ID policies: reads and writes. Both are
 bound to profile identity and credential generation; writes must be a subset
 of reads. Slack Connect conversations are denied unless their shared status is
-explicitly accepted and recorded. A later shared-state mismatch fails closed.
-An explicit `allow-reads set --reset-stale-policy` is the sole policy
+explicitly accepted and recorded. For the additive workflow, the user naming
+that exact chat is acceptance of its verified shared status. A later
+shared-state mismatch still fails closed.
+The additive `policy.Registry.Add` merges one verified target under one policy
+lock; write enrollment adds read and write together, preserving all other IDs.
+Existing mismatched shared state is rejected rather than overwritten.
+An explicit `allow-reads set --reset-stale-policy` remains the sole stale-binding
 migration path after a confirmed identity or generation replacement: its
 preview and apply discard all old writes and replace the full read target set.
 Without that flag, stale policy remains a conflict and cannot be used.
@@ -200,6 +206,24 @@ profile/policy metadata. It emits an identity-bound digest receipt without
 message text. A real send must reproduce the exact intent and pass `--yes`.
 The CLI then revalidates the credential, workspace, target, shared state, and
 optional parent thread before one `chat.postMessage` dispatch.
+
+`workflow preview` creates the same local intent receipt without requiring an
+existing target policy. The Skill shows the exact recipient (including parent)
+and source text, and keeps hashes internal. An explicit exact-text/recipient
+send instruction is consent; otherwise the Skill obtains one recipient/text
+consent. `workflow send` takes that approved digest, creates a fresh local
+receipt, atomically enrolls the named target and uses the existing typed
+confirmed-send core. The profile lock covers the fresh profile read and digest
+comparison through credential access, enrollment, preflight and one dispatch,
+serializing identity/generation changes with login. Changed intent is rejected
+before effectful work. Legacy send flags/receipt behavior remain unchanged.
+
+Workflow reads reuse data-returning history/thread cores, and both send leaves
+reuse a data-returning confirmed-send core. Each leaf emits exactly one bounded
+v1 envelope through the existing writer; no subprocess output parsing exists.
+The `--user-requested` flag is a caller assertion. The trusted Skill owns human
+request provenance; the CLI cannot distinguish a malicious local caller from a
+trusted one. Fetched Slack content is never interpreted as workflow input.
 
 Transport, timeout, server, or malformed-success conditions that might have
 applied the write become `WRITE_OUTCOME_UNKNOWN` at exit 9. One bounded read

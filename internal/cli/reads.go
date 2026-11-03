@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -108,42 +109,11 @@ func newHistoryCommand(dependencies Dependencies) *cobra.Command {
 	var name, conversationID, cursorValue, oldest, latest string
 	var limit int
 	command := &cobra.Command{Use: "history", Args: exactArgs(0), RunE: func(command *cobra.Command, _ []string) error {
-		if err := validateLimit(limit); err != nil {
-			return err
-		}
-		if oldest != "" {
-			if err := validateTimestamp(oldest, "--oldest"); err != nil {
-				return err
-			}
-		}
-		if latest != "" {
-			if err := validateTimestamp(latest, "--latest"); err != nil {
-				return err
-			}
-		}
-		current, err := loadSession(command.Context(), dependencies, name, profile.CapabilityRead)
+		data, meta, err := readHistory(command.Context(), dependencies, name, conversationID, cursorValue, oldest, latest, limit)
 		if err != nil {
 			return err
 		}
-		if _, _, err := preflightTarget(command.Context(), dependencies, current, conversationID, policy.Read); err != nil {
-			return err
-		}
-		query := fmt.Sprintf("conversation=%s&limit=%d&oldest=%s&latest=%s", conversationID, limit, oldest, latest)
-		profileIdentity := profile.Identity(current.profile)
-		upstream, err := cursor.Unbind(cursorValue, profileIdentity, current.profile.WorkspaceID, "conversations.history", query)
-		if err != nil {
-			return usageError("INVALID_CURSOR", "cursor does not match this request", err)
-		}
-		page, err := dependencies.Messages.History(command.Context(), current.token, slack.HistoryOptions{ConversationID: conversationID, Limit: limit, Cursor: upstream, Oldest: oldest, Latest: latest})
-		if err != nil {
-			return err
-		}
-		next, err := cursor.Bind(profileIdentity, current.profile.WorkspaceID, "conversations.history", query, page.NextCursor)
-		if err != nil {
-			return err
-		}
-		count := len(page.Messages)
-		return dependencies.Output.Success(page.Messages, &output.Meta{Profile: name, WorkspaceID: current.profile.WorkspaceID, ContentTrust: "untrusted", Count: &count, NextCursor: next})
+		return dependencies.Output.Success(data, meta)
 	}}
 	command.Flags().StringVar(&name, "profile", "", "exact profile name")
 	command.Flags().StringVar(&conversationID, "conversation-id", "", "exact conversation ID")
@@ -158,39 +128,11 @@ func newThreadCommand(dependencies Dependencies) *cobra.Command {
 	var name, conversationID, threadTS, cursorValue string
 	var limit int
 	command := &cobra.Command{Use: "thread", Args: exactArgs(0), RunE: func(command *cobra.Command, _ []string) error {
-		if err := validateLimit(limit); err != nil {
-			return err
-		}
-		if err := validateTimestamp(threadTS, "--thread-ts"); err != nil {
-			return err
-		}
-		current, err := loadSession(command.Context(), dependencies, name, profile.CapabilityRead)
+		data, meta, err := readThread(command.Context(), dependencies, name, conversationID, threadTS, cursorValue, limit)
 		if err != nil {
 			return err
 		}
-		if _, _, err := preflightTarget(command.Context(), dependencies, current, conversationID, policy.Read); err != nil {
-			return err
-		}
-		query := fmt.Sprintf("conversation=%s&thread=%s&limit=%d", conversationID, threadTS, limit)
-		profileIdentity := profile.Identity(current.profile)
-		upstream, normalized, err := cursor.UnbindThread(cursorValue, profileIdentity, current.profile.WorkspaceID, "conversations.replies", query)
-		if err != nil {
-			return usageError("INVALID_CURSOR", "cursor does not match this request", err)
-		}
-		options := slack.ThreadOptions{ConversationID: conversationID, ThreadTS: threadTS, Limit: limit, Cursor: upstream}
-		if normalized {
-			options.Cursor, options.PageCursor = "", upstream
-		}
-		page, err := dependencies.Messages.Replies(command.Context(), current.token, options)
-		if err != nil {
-			return err
-		}
-		next, err := cursor.BindThread(profileIdentity, current.profile.WorkspaceID, "conversations.replies", query, page.NextCursor)
-		if err != nil {
-			return errx.New(errx.Internal, "SLACK_RESPONSE_INVALID", "Slack returned an invalid thread continuation", "report this response contract violation").Wrap(err)
-		}
-		count := len(page.Messages)
-		return dependencies.Output.Success(page.Messages, &output.Meta{Profile: name, WorkspaceID: current.profile.WorkspaceID, ContentTrust: "untrusted", Count: &count, NextCursor: next})
+		return dependencies.Output.Success(data, meta)
 	}}
 	command.Flags().StringVar(&name, "profile", "", "exact profile name")
 	command.Flags().StringVar(&conversationID, "conversation-id", "", "exact conversation ID")
@@ -226,4 +168,79 @@ func newUserGetCommand(dependencies Dependencies) *cobra.Command {
 	}}
 	command.Flags().StringVar(&name, "profile", "", "exact profile name")
 	return command
+}
+
+func readHistory(ctx context.Context, dependencies Dependencies, name, conversationID, cursorValue, oldest, latest string, limit int) ([]slack.Message, *output.Meta, error) {
+	if err := validateLimit(limit); err != nil {
+		return nil, nil, err
+	}
+	if oldest != "" {
+		if err := validateTimestamp(oldest, "--oldest"); err != nil {
+			return nil, nil, err
+		}
+	}
+	if latest != "" {
+		if err := validateTimestamp(latest, "--latest"); err != nil {
+			return nil, nil, err
+		}
+	}
+	current, err := loadSession(ctx, dependencies, name, profile.CapabilityRead)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, _, err := preflightTarget(ctx, dependencies, current, conversationID, policy.Read); err != nil {
+		return nil, nil, err
+	}
+	query := fmt.Sprintf("conversation=%s&limit=%d&oldest=%s&latest=%s", conversationID, limit, oldest, latest)
+	profileIdentity := profile.Identity(current.profile)
+	upstream, err := cursor.Unbind(cursorValue, profileIdentity, current.profile.WorkspaceID, "conversations.history", query)
+	if err != nil {
+		return nil, nil, usageError("INVALID_CURSOR", "cursor does not match this request", err)
+	}
+	page, err := dependencies.Messages.History(ctx, current.token, slack.HistoryOptions{ConversationID: conversationID, Limit: limit, Cursor: upstream, Oldest: oldest, Latest: latest})
+	if err != nil {
+		return nil, nil, err
+	}
+	next, err := cursor.Bind(profileIdentity, current.profile.WorkspaceID, "conversations.history", query, page.NextCursor)
+	if err != nil {
+		return nil, nil, err
+	}
+	count := len(page.Messages)
+	return page.Messages, &output.Meta{Profile: name, WorkspaceID: current.profile.WorkspaceID, ContentTrust: "untrusted", Count: &count, NextCursor: next}, nil
+}
+
+func readThread(ctx context.Context, dependencies Dependencies, name, conversationID, threadTS, cursorValue string, limit int) ([]slack.Message, *output.Meta, error) {
+	if err := validateLimit(limit); err != nil {
+		return nil, nil, err
+	}
+	if err := validateTimestamp(threadTS, "--thread-ts"); err != nil {
+		return nil, nil, err
+	}
+	current, err := loadSession(ctx, dependencies, name, profile.CapabilityRead)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, _, err := preflightTarget(ctx, dependencies, current, conversationID, policy.Read); err != nil {
+		return nil, nil, err
+	}
+	query := fmt.Sprintf("conversation=%s&thread=%s&limit=%d", conversationID, threadTS, limit)
+	profileIdentity := profile.Identity(current.profile)
+	upstream, normalized, err := cursor.UnbindThread(cursorValue, profileIdentity, current.profile.WorkspaceID, "conversations.replies", query)
+	if err != nil {
+		return nil, nil, usageError("INVALID_CURSOR", "cursor does not match this request", err)
+	}
+	options := slack.ThreadOptions{ConversationID: conversationID, ThreadTS: threadTS, Limit: limit, Cursor: upstream}
+	if normalized {
+		options.Cursor, options.PageCursor = "", upstream
+	}
+	page, err := dependencies.Messages.Replies(ctx, current.token, options)
+	if err != nil {
+		return nil, nil, err
+	}
+	next, err := cursor.BindThread(profileIdentity, current.profile.WorkspaceID, "conversations.replies", query, page.NextCursor)
+	if err != nil {
+		return nil, nil, errx.New(errx.Internal, "SLACK_RESPONSE_INVALID", "Slack returned an invalid thread continuation", "report this response contract violation").Wrap(err)
+	}
+	count := len(page.Messages)
+	return page.Messages, &output.Meta{Profile: name, WorkspaceID: current.profile.WorkspaceID, ContentTrust: "untrusted", Count: &count, NextCursor: next}, nil
 }

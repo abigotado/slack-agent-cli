@@ -140,6 +140,7 @@ When piping JSON through jq, enable shell pipefail to preserve CLI failures.
 		newUsersCommand(dependencies),
 		newFilesCommand(dependencies),
 		newSkillCommand(dependencies),
+		newWorkflowCommand(dependencies),
 	)
 	return root
 }

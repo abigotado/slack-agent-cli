@@ -1,4 +1,4 @@
 interface:
   display_name: "Slack Agent CLI"
   short_description: "Bounded, allowlisted Slack access with guarded writes"
-  default_prompt: "Use $slack to read the requested conversation with a compatible established profile or one unambiguous local profile and read policy; pass --profile explicitly and confirm writes from their dry-run receipt."
+  default_prompt: "Use $slack to read the user-named chat with a unique compatible profile, or send the exact recipient and text with one consent; keep receipt hashes internal."
