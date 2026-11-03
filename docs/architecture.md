@@ -111,7 +111,10 @@ capabilities, and credential generation.
 
 The runtime Skill selects an exact profile through local `workflow resolve`,
 using trusted request constraints and current local target policies. It passes
-that name explicitly on every network command. A requested profile remains
+that name explicitly on every network command, together with the resolver
+identity digest in `--profile-binding`. Target workflows reject a changed
+workspace/identity/generation before effects; reads and sends validate under
+the profile lock. Raw IDs cannot silently move to a replacement profile. A requested profile remains
 authoritative; failures never trigger account probing or silent switching.
 There is no implicit CLI profile or environment selector. See
 [workflows.md](workflows.md) for resolution and conversational consent.

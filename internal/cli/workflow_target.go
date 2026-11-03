@@ -105,3 +105,8 @@ func (target workflowTarget) matches(p profile.Profile) bool {
 	}
 	return true
 }
+
+// C-channel threads require conversations.replies, including send preflight.
+func (target workflowTarget) supports(kind profile.TokenKind) bool {
+	return target.ThreadTS == "" || !strings.HasPrefix(target.ConversationID, "C") || kind == profile.TokenUser
+}

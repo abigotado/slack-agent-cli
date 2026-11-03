@@ -144,7 +144,7 @@ Ambiguous profiles need one choice; failures never silently switch accounts.
 slack-agent-cli workflow resolve \
   --target https://example.slack.com/archives/C0123456789/p1234567890123456 \
   --operation read
-slack-agent-cli workflow read --profile work \
+slack-agent-cli workflow read --profile work --profile-binding INTERNAL_RESOLVER_BINDING \
   --target https://example.slack.com/archives/C0123456789/p1234567890123456 \
   --user-requested
 ```
@@ -157,7 +157,7 @@ already supplies that consent. Humans see recipient/text, never hashes. Changed
 text/recipient/profile/generation requires fresh consent. These commands are
 available in source; the Skill includes a legacy bridge for installed 0.3.2.
 See [workflow behavior and question audit](docs/workflows.md) for commands,
-trusted-caller limitations and legacy enrollment's non-atomic behavior.
+trusted-caller limitations and the existing-target-only legacy bridge.
 
 ### Narrow direct-message-only profile
 

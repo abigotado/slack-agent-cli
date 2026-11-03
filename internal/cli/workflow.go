@@ -61,12 +61,24 @@ func newWorkflowResolve(dependencies Dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if !target.matches(selected) {
+				return errxPermission("WORKSPACE_MISMATCH", "explicit profile does not match the target workspace")
+			}
+			if !selected.HasCapability(capability) {
+				return errxPermission("CAPABILITY_NOT_DECLARED", "profile does not declare the required capability")
+			}
+			if !target.supports(selected.TokenKind) {
+				return errxPermission("USER_TOKEN_REQUIRED", "channel thread preflight requires a user-token profile")
+			}
+			if kind != "" && string(selected.TokenKind) != kind {
+				return errxPermission("TOKEN_KIND_MISMATCH", "explicit profile does not match the requested token kind")
+			}
 			candidates = []profile.Profile{selected}
 		}
 		eligible := []profile.Profile{}
 		allowed := []profile.Profile{}
 		for _, p := range candidates {
-			if !target.matches(p) || !p.HasCapability(capability) || (kind != "" && string(p.TokenKind) != kind) {
+			if !target.matches(p) || !p.HasCapability(capability) || (kind != "" && string(p.TokenKind) != kind) || !target.supports(p.TokenKind) {
 				continue
 			}
 			_, err := dependencies.Policies.Get(command.Context(), p)
@@ -97,7 +109,7 @@ func newWorkflowResolve(dependencies Dependencies) *cobra.Command {
 			return errx.New(errx.Ambiguous, "PROFILE_AMBIGUOUS", "several profiles match the exact target", "ask once for the intended profile: "+strings.Join(names, ", "))
 		}
 		p := eligible[0]
-		return dependencies.Output.Success(map[string]any{"profile": p.Name, "workspace_id": p.WorkspaceID, "token_kind": p.TokenKind, "target": target}, nil)
+		return dependencies.Output.Success(map[string]any{"profile": p.Name, "workspace_id": p.WorkspaceID, "token_kind": p.TokenKind, "target": target, "profile_binding": profile.Identity(p)}, nil)
 	}}
 	command.Flags().StringVar(&raw, "target", "", "exact user-supplied Slack conversation ID or link")
 	command.Flags().StringVar(&operation, "operation", "", "read or send")
@@ -108,16 +120,25 @@ func newWorkflowResolve(dependencies Dependencies) *cobra.Command {
 	return command
 }
 
-func workflowProfile(ctx context.Context, dependencies Dependencies, name string, target workflowTarget, capability profile.Capability) (profile.Profile, error) {
+func workflowProfile(ctx context.Context, dependencies Dependencies, name, binding string, target workflowTarget, capability profile.Capability) (profile.Profile, error) {
 	if err := requireProfile(name); err != nil {
 		return profile.Profile{}, err
+	}
+	if binding == "" {
+		return profile.Profile{}, usageError("PROFILE_BINDING_REQUIRED", "--profile-binding from workflow resolve is required", nil)
 	}
 	p, err := dependencies.Profiles.Get(ctx, name)
 	if err != nil {
 		return profile.Profile{}, err
 	}
+	if binding != profile.Identity(p) {
+		return profile.Profile{}, errx.New(errx.Conflict, "PROFILE_CHANGED", "profile changed after local selection", "resolve again; review any changed workspace or identity before continuing")
+	}
 	if !target.matches(p) {
 		return profile.Profile{}, errxPermission("WORKSPACE_MISMATCH", "explicit profile does not match the target workspace")
+	}
+	if !target.supports(p.TokenKind) {
+		return profile.Profile{}, errxPermission("USER_TOKEN_REQUIRED", "channel thread preflight requires a user-token profile")
 	}
 	if !p.HasCapability(capability) {
 		return profile.Profile{}, errxPermission("CAPABILITY_NOT_DECLARED", "profile does not declare the required capability")
@@ -168,7 +189,7 @@ func enrollWorkflowTarget(ctx context.Context, dependencies Dependencies, p prof
 }
 
 func newWorkflowRead(dependencies Dependencies) *cobra.Command {
-	var name, raw, thread, continuation string
+	var name, binding, raw, thread, continuation string
 	var requested bool
 	var limit int
 	command := &cobra.Command{Use: "read", Args: exactArgs(0), RunE: func(command *cobra.Command, _ []string) error {
@@ -185,7 +206,7 @@ func newWorkflowRead(dependencies Dependencies) *cobra.Command {
 		var data []slack.Message
 		var meta *output.Meta
 		err = dependencies.Profiles.WithLock(command.Context(), func() error {
-			p, err := workflowProfile(command.Context(), dependencies, name, target, profile.CapabilityRead)
+			p, err := workflowProfile(command.Context(), dependencies, name, binding, target, profile.CapabilityRead)
 			if err != nil {
 				return err
 			}
@@ -219,6 +240,7 @@ func newWorkflowRead(dependencies Dependencies) *cobra.Command {
 		return dependencies.Output.Success(data, meta)
 	}}
 	command.Flags().StringVar(&name, "profile", "", "exact profile name")
+	command.Flags().StringVar(&binding, "profile-binding", "", "internal identity binding from workflow resolve")
 	command.Flags().StringVar(&raw, "target", "", "exact user-supplied conversation ID or Slack link")
 	command.Flags().StringVar(&thread, "thread-ts", "", "exact parent when target is a conversation")
 	command.Flags().BoolVar(&requested, "user-requested", false, "caller asserts target came from the user, never Slack content")
@@ -228,7 +250,7 @@ func newWorkflowRead(dependencies Dependencies) *cobra.Command {
 }
 
 func newWorkflowSend(dependencies Dependencies, preview bool) *cobra.Command {
-	var name, raw, thread, approved string
+	var name, binding, raw, thread, approved string
 	var stdin, yes, requested bool
 	use := "send"
 	if preview {
@@ -247,7 +269,7 @@ func newWorkflowSend(dependencies Dependencies, preview bool) *cobra.Command {
 			return usageError("INVALID_MESSAGE_TEXT", "message text is invalid", err)
 		}
 		if preview {
-			p, err := workflowProfile(command.Context(), dependencies, name, target, profile.CapabilityMessageWrite)
+			p, err := workflowProfile(command.Context(), dependencies, name, binding, target, profile.CapabilityMessageWrite)
 			if err != nil {
 				return err
 			}
@@ -266,7 +288,7 @@ func newWorkflowSend(dependencies Dependencies, preview bool) *cobra.Command {
 		var data map[string]any
 		var meta *output.Meta
 		err = dependencies.Profiles.WithLock(command.Context(), func() error {
-			p, err := workflowProfile(command.Context(), dependencies, name, target, profile.CapabilityMessageWrite)
+			p, err := workflowProfile(command.Context(), dependencies, name, binding, target, profile.CapabilityMessageWrite)
 			if err != nil {
 				return err
 			}
@@ -291,6 +313,7 @@ func newWorkflowSend(dependencies Dependencies, preview bool) *cobra.Command {
 		return dependencies.Output.ConfirmedWriteSuccess(data, meta)
 	}}
 	command.Flags().StringVar(&name, "profile", "", "exact profile name")
+	command.Flags().StringVar(&binding, "profile-binding", "", "internal identity binding from workflow resolve")
 	command.Flags().StringVar(&raw, "target", "", "exact user-supplied conversation ID or Slack link")
 	command.Flags().StringVar(&thread, "thread-ts", "", "exact approved parent when target is a conversation")
 	command.Flags().BoolVar(&stdin, "text-stdin", false, "read bounded plain text from stdin")

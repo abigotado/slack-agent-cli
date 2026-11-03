@@ -88,8 +88,11 @@ T-workspace prefix is accepted.
 
 ## Workflow results
 
-`workflow resolve` is local only and returns a selected exact profile and
-canonical target; exit 4 means ask once to choose a genuinely ambiguous account.
+`workflow resolve` is local only and returns a selected exact profile,
+canonical target and internal `profile_binding`. Pass the binding as required
+`--profile-binding` to read/preview/send; a changed identity/generation fails
+with `PROFILE_CHANGED` (exit 9) before effects, while omission is
+`PROFILE_BINDING_REQUIRED` (exit 2). Keep it internal. Resolver exit 4 means ask once to choose a genuinely ambiguous account.
 `workflow read` returns the existing untrusted message array/meta/cursor after
 atomic exact read enrollment. `workflow preview` emits the existing intent
 receipt locally without requiring policy. It never emits message text.

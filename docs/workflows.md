@@ -30,8 +30,16 @@ requested token kind and capability. Among current compatible policies, a sole
 exact operation-policy match wins; otherwise a sole compatible profile is usable
 for the user-requested enrollment. Ambiguity fails with exit 4. A requested
 profile is authoritative. No Keychain access or account probing occurs.
+C-channel threads exclude bot profiles because their read/send preflight uses
+[`conversations.replies`](https://docs.slack.dev/reference/methods/conversations.replies/),
+which requires a user token for channel threads. For legacy G targets that do
+not identify channel versus group DM locally, use token-kind constraints from
+trusted context; never probe accounts to guess.
 Every network command still names an exact `--profile NAME`, so the Skill uses
-the resolver result mechanically. Selection and the first network operation are
+the resolver result mechanically, passing the internal `profile_binding` as
+required `--profile-binding` to read/preview/send. Each target command checks
+the pinned identity/workspace/generation; reads and sends do so under the
+profile lock before effects. A replaced profile cannot retarget a raw-ID read. Selection and the first network operation are
 two commands; they require no human round trip.
 
 `workflow read` accepts the user's exact target and `--user-requested`, verifies
@@ -91,9 +99,13 @@ they do not claim protection against a malicious local caller.
 ## Installed 0.3.2
 
 The Skill includes a legacy bridge until a separately authorized binary release.
-It applies the same human-consent rules, but uses local inventory, whole-set
-policy commands and the existing dry-run/send pair. Its policy change is
-read-current → preserve complete sets → apply → reread/verify, aborting observed
-drift. That bridge is best-effort and cannot guarantee atomic enrollment under
-concurrent policy writers; the new workflow commands provide that guarantee.
-It must never reset stale policies, retry a write, or release/upgrade by itself.
+It applies the same human-consent rules only to targets already permitted by
+current read/write policies, using local inventory and the existing dry-run/send
+pair. It refuses automatic enrollment via whole-set policy replacement: a
+concurrent grant or revocation could be lost or resurrected without detectable
+final drift. New targets require the workflow binary's atomic enrollment.
+The legacy bridge also lacks a CLI-enforced resolver identity pin; recheck the
+local identity/generation and stop on observed changes. It must never reset
+stale policies, retry a write, or release/upgrade by itself. The question table
+above describes the workflow-capable CLI; missing legacy features are concrete
+compatibility blockers, not reasons to request redundant consent.
