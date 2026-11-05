@@ -4,13 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [0.4.0] - 2026-11-05
 
-- Add workflow commands that resolve an unambiguous local profile, strictly
-  parse exact user-named Slack IDs and links, enroll only that target, and read
-  bounded history or threads without a separate policy question.
-- Add a one-consent send flow: preview binds exact text and recipient, then the
-  CLI rechecks the local receipt and atomically enrolls the target before one
-  dispatch. Exact text and recipient on a direct send request already provide
-  consent; a changed intent requires fresh consent.
+- Add workflow commands that resolve compatible profiles from local metadata,
+  strictly parse exact user-named Slack IDs and links, enroll only that target,
+  and read bounded history or threads without a separate policy question. The
+  CLI reports unresolved profile ambiguity; the Skill asks only then.
+- Add a one-consent send flow: preview returns a receipt bound to exact text and
+  recipient; the Skill keeps its digest internal and shows the user the text
+  and recipient. The CLI rechecks the receipt and atomically enrolls the target
+  before one dispatch. An exact-text, exact-recipient send request already
+  provides consent; changed intent requires fresh consent.
 - Keep Slack-returned content untrusted and inert. It cannot enroll a target,
   choose an account or redirect a read or send.
 - Keep ambiguous writes at exit 9 after bounded diagnostic reconciliation;
