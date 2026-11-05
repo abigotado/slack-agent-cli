@@ -100,16 +100,16 @@ names, topics, links, files or envelopes into target/approval flags. Tests prove
 that returned malicious content remains inert and cannot redirect the workflow;
 they do not claim protection against a malicious local caller.
 
-## Installed 0.3.2
+## Compatibility with 0.3.2
 
-The Skill includes a legacy bridge until a separately authorized binary release.
-It applies the same human-consent rules only to targets already permitted by
-current read/write policies, using local inventory and the existing dry-run/send
-pair. It refuses automatic enrollment via whole-set policy replacement: a
-concurrent grant or revocation could be lost or resurrected without detectable
-final drift. New targets require the workflow binary's atomic enrollment.
-The legacy bridge also lacks a CLI-enforced resolver identity pin; recheck the
-local identity/generation and stop on observed changes. It must never reset
-stale policies, retry a write, or release/upgrade by itself. The question table
-above describes the workflow-capable CLI; missing legacy features are concrete
+The Skill retains a legacy bridge for installations of 0.3.2. It applies the
+same human-consent rules only to targets already permitted by current read/write
+policies, using local inventory and the existing dry-run/send pair. It refuses
+automatic enrollment via whole-set policy replacement: a concurrent grant or
+revocation could be lost or resurrected without detectable final drift. New
+targets require the workflow-capable binary's atomic enrollment. The legacy
+bridge also lacks a CLI-enforced resolver identity pin; recheck the local
+identity/generation and stop on observed changes. It must never reset stale
+policies, retry a write, or release/upgrade by itself. The question table above
+describes the workflow-capable CLI; missing legacy features are concrete
 compatibility blockers, not reasons to request redundant consent.
