@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abigotado/slack-agent-cli/internal/auth"
 	"github.com/abigotado/slack-agent-cli/internal/errx"
@@ -52,6 +53,7 @@ type fakeSlack struct {
 	calls          []string
 	postResult     slack.PostResult
 	postErr        error
+	postHook       func(slack.PostOptions)
 }
 
 func (s *fakeSlack) AuthTest(context.Context, slack.Token) (slack.Identity, error) {
@@ -91,6 +93,9 @@ func (s *fakeSlack) UserInfo(_ context.Context, _ slack.Token, id string) (slack
 }
 func (s *fakeSlack) PostMessage(_ context.Context, _ slack.Token, options slack.PostOptions) (slack.PostResult, error) {
 	s.calls = append(s.calls, "chat.postMessage")
+	if s.postHook != nil {
+		s.postHook(options)
+	}
 	if s.postErr != nil {
 		return slack.PostResult{}, s.postErr
 	}
@@ -983,7 +988,7 @@ func TestSendDispatchesExactlyOnceAfterPreflights(t *testing.T) {
 	}
 }
 
-func TestUnknownWriteReconcilesWithoutRetry(t *testing.T) {
+func TestUnknownWriteCandidateDoesNotProveDispatch(t *testing.T) {
 	t.Parallel()
 	dependencies, store, api, stdout := newTestDependencies(t)
 	p := seedSession(t, dependencies, store, []profile.Capability{profile.CapabilityRead, profile.CapabilityMessageWrite})
@@ -991,7 +996,9 @@ func TestUnknownWriteReconcilesWithoutRetry(t *testing.T) {
 	no := false
 	api.conversation = slack.Conversation{ID: "C1", IsShared: &no, IsExtShared: &no, IsOrgShared: &no}
 	api.postErr = errx.New(errx.Conflict, "WRITE_OUTCOME_UNKNOWN", "unknown", "reconcile")
-	api.messages = slack.MessagePage{Messages: []slack.Message{{User: "U1", Text: "hello", TS: "2.0"}}}
+	api.postHook = func(slack.PostOptions) {
+		api.messages = slack.MessagePage{Messages: []slack.Message{{User: "U1", Text: "hello", TS: fmt.Sprintf("%.6f", float64(time.Now().UnixMicro())/1e6)}}}
+	}
 	dependencies.Input = bytes.NewBufferString("hello")
 	if exit := Run(context.Background(), []string{"messages", "send", "--profile", "work", "--conversation-id", "C1", "--text-stdin", "--dry-run"}, dependencies); exit != errx.OK {
 		t.Fatal(exit)
@@ -1000,7 +1007,7 @@ func TestUnknownWriteReconcilesWithoutRetry(t *testing.T) {
 	stdout.Reset()
 	dependencies.Input = bytes.NewBufferString("hello")
 	exit := Run(context.Background(), []string{"messages", "send", "--profile", "work", "--conversation-id", "C1", "--text-stdin", "--confirm-intent", receipt, "--yes"}, dependencies)
-	if exit != errx.OK {
+	if exit != errx.Conflict {
 		t.Fatalf("exit %d: %s", exit, stdout.String())
 	}
 	posts := 0
@@ -1012,10 +1019,10 @@ func TestUnknownWriteReconcilesWithoutRetry(t *testing.T) {
 	if posts != 1 {
 		t.Fatalf("write replayed: %v", api.calls)
 	}
-	if decodeEnvelope(t, stdout)["meta"].(map[string]any)["reconciled"] != true {
-		t.Fatal("write not marked reconciled")
+	if decodeEnvelope(t, stdout)["error"].(map[string]any)["code"] != "WRITE_OUTCOME_UNKNOWN" {
+		t.Fatal("matching candidate falsely confirmed dispatch")
 	}
-	if dependencies.WriteState.State() != writestate.Confirmed {
+	if dependencies.WriteState.State() != writestate.Started {
 		t.Fatalf("write state %v", dependencies.WriteState.State())
 	}
 }

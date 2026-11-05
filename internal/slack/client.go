@@ -101,6 +101,10 @@ type apiBase struct {
 type postEnvelope struct {
 	Channel string `json:"channel"`
 	TS      string `json:"ts"`
+	Message struct {
+		TS       string `json:"ts"`
+		ThreadTS string `json:"thread_ts"`
+	} `json:"message"`
 }
 
 // AuthTest validates a Web API token and returns exact identity.
@@ -238,7 +242,12 @@ func (c *Client) PostMessage(ctx context.Context, token Token, options PostOptio
 	if err := c.call(ctx, token, http.MethodPost, "chat.postMessage", values, &response, writeOperation); err != nil {
 		return PostResult{}, err
 	}
-	return PostResult{ConversationID: response.Channel, TS: response.TS, ThreadTS: options.ThreadTS}, nil
+	if !validSlackID(response.Channel) || response.Channel != options.ConversationID ||
+		!validSlackTimestamp(response.TS) || !validSlackTimestamp(response.Message.TS) || response.Message.TS != response.TS ||
+		response.Message.ThreadTS != options.ThreadTS {
+		return PostResult{}, networkError(writeOperation, errx.StageResponseJSON, errors.New("write acknowledgement did not match the requested message"))
+	}
+	return PostResult{ConversationID: response.Channel, TS: response.Message.TS, ThreadTS: response.Message.ThreadTS}, nil
 }
 
 func validatePostOptions(options PostOptions) error {

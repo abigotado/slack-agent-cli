@@ -47,3 +47,26 @@ The Skill must never call a command named `api`, `request`, or `raw`; these are
 not part of the binary contract.
 
 Paginated reads default to `--limit 50`; explicit values must be 1-100.
+
+## User-requested workflows
+
+Local selection and preview never load Keychain or contact Slack:
+
+```text
+slack-agent-cli workflow resolve --target ID_OR_LINK --operation read|send \
+  [--profile NAME] [--token-kind user|bot] [--workspace-id ID] [--thread-ts TS]
+slack-agent-cli workflow preview --profile NAME --profile-binding BINDING --target ID_OR_LINK \
+  [--thread-ts TS] --text-stdin
+slack-agent-cli workflow read --profile NAME --profile-binding BINDING --target ID_OR_LINK \
+  [--thread-ts TS] --user-requested [--limit N] [--cursor CURSOR]
+slack-agent-cli workflow send --profile NAME --profile-binding BINDING --target ID_OR_LINK \
+  [--thread-ts TS] --text-stdin --approved-intent INTERNAL_PREVIEW_DIGEST \
+  --yes --user-requested
+```
+
+Carry `profile_binding` from resolve to every workflow target command; it
+pins the selected identity/generation before any effects.
+The user's exact chat request authorizes additive enrollment, without a second
+allowlist question. Send approval is for the recipient and source text, not a
+human-visible hash. A permalink's parent is part of the approved recipient.
+Existing explicit-profile commands remain available; see legacy.md for 0.3.2.

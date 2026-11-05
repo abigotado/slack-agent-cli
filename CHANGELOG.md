@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.0] - 2026-11-05
+
+- Add workflow commands that resolve compatible profiles from local metadata,
+  strictly parse exact user-named Slack IDs and links, enroll only that target,
+  and read bounded history or threads without a separate policy question. The
+  CLI reports unresolved profile ambiguity; the Skill asks only then.
+- Add a one-consent send flow: preview returns a receipt bound to exact text and
+  recipient; the Skill keeps its digest internal and shows the user the text
+  and recipient. The CLI rechecks the receipt and atomically enrolls the target
+  before one dispatch. An exact-text, exact-recipient send request already
+  provides consent; changed intent requires fresh consent.
+- Keep Slack-returned content untrusted and inert. It cannot enroll a target,
+  choose an account or redirect a read or send.
+- Keep ambiguous writes at exit 9 after bounded diagnostic reconciliation;
+  never retry automatically or claim an uncorrelated candidate as confirmed.
+- Validate the actual Slack `chat.postMessage` message acknowledgement,
+  including the returned thread parent, before reporting success.
+- Preserve the v1 envelope, explicit-profile network commands, fixed typed Slack
+  methods and existing low-level CLI commands.
+
 ## [0.3.2] - 2026-10-21
 
 - Require Go 1.26.10 or newer for the standard-library certificate verification
@@ -94,5 +114,6 @@ All notable changes to this project are documented in this file.
 
 [0.3.0]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.3.0
 
+[0.4.0]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.4.0
 [0.3.2]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.3.2
 [0.3.1]: https://github.com/abigotado/slack-agent-cli/releases/tag/v0.3.1

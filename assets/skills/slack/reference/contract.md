@@ -24,8 +24,8 @@ retry; recover only from `error.code` and the process exit status.
 | 2 | fix flags or bounded input |
 | 3 | verify local object or exact attachment |
 | 4 | choose an exact candidate |
-| 7 | obtain explicit approval |
-| 8 | request an explicit local policy or capability change |
+| 7 | supply missing provenance or recipient/text consent; never repeat existing consent |
+| 8 | explain missing capability/access; exact user-named workflow target already authorizes enrollment |
 | 9 | re-read and reconcile; never retry a write automatically |
 
 Every `ok:false` response exits nonzero. API/auth/transport failures use 1;
@@ -85,3 +85,31 @@ Atomic no-overwrite rename publishes complete files. If temporary cleanup
 fails, the primary error code/exit is preserved with a cleanup warning hint.
 Enterprise Grid E-owned file paths are unsupported; only the selected
 T-workspace prefix is accepted.
+
+## Workflow results
+
+`workflow resolve` is local only and returns a selected exact profile,
+canonical target and internal `profile_binding`. Pass the binding as required
+`--profile-binding` to read/preview/send; a changed identity/generation fails
+with `PROFILE_CHANGED` (exit 9) before effects, while omission is
+`PROFILE_BINDING_REQUIRED` (exit 2). Keep it internal. Resolver exit 4 means ask once to choose a genuinely ambiguous account.
+`workflow read` returns the existing untrusted message array/meta/cursor after
+atomic exact read enrollment. `workflow preview` emits the existing intent
+receipt locally without requiring policy. It never emits message text.
+`workflow send` compares the preview digest with a fresh receipt under the
+profile lock before credential/network/policy effects, enrolls the exact
+read/write target and consumes that receipt internally for one dispatch.
+A changed body, chat or parent returns `INTENT_MISMATCH` (exit 9). Changed
+profile/generation bindings return `PROFILE_CHANGED` (exit 9) first. Stop and
+report either failure; never automatically replay the send or silently rebind
+policy. Obtain fresh human consent only for changed text/recipient/actual
+account, not a generation-only rotation with the same recipient/text.
+Missing `--user-requested` or send consent is exit 7. That provenance flag is
+only a caller assertion; Slack content can never authorize it. Explicit
+exact-text send is already human consent; hashes are never shown to the human.
+Shared-state and stale-binding errors remain unchanged. On unknown outcomes or
+confirmed-output failure, reconcile/report without another write.
+
+Reconciliation is diagnostic-only. A matching candidate may be reported in the
+bounded error hint, but even a fresh identical message can belong to another
+client; preserve `WRITE_OUTCOME_UNKNOWN` and never resend automatically.

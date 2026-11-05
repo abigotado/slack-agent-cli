@@ -160,6 +160,97 @@ func (r *Registry) Replace(ctx context.Context, p profile.Profile, kind Kind, ta
 	return result, err
 }
 
+// Add atomically merges one exact target into the current identity-bound
+// policy. Write targets are also reads, preserving the write subset invariant.
+func (r *Registry) Add(ctx context.Context, p profile.Profile, kind Kind, target Target) (Set, error) {
+	if err := ctx.Err(); err != nil {
+		return Set{}, err
+	}
+	if kind != Read && kind != Write {
+		return Set{}, errors.New("unknown policy kind")
+	}
+	if err := validateTargets([]Target{target}); err != nil {
+		return Set{}, err
+	}
+	if err := r.ensureDirectory(); err != nil {
+		return Set{}, err
+	}
+
+	var result Set
+	committed := false
+	err := lockfile.With(ctx, r.path+".lock", func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		file, err := r.load()
+		if err != nil {
+			return err
+		}
+		index := -1
+		for current := range file.Sets {
+			if file.Sets[current].ProfileName == p.Name {
+				index = current
+				break
+			}
+		}
+
+		set := newSet(p)
+		if index >= 0 {
+			set = file.Sets[index]
+			if err := validateBinding(set, p); err != nil {
+				return err
+			}
+		}
+		if err := validateTargetSharedState(set.Reads, target); err != nil {
+			return err
+		}
+		if err := validateTargetSharedState(set.Writes, target); err != nil {
+			return err
+		}
+
+		changed := false
+		if !containsTarget(set.Reads, target.ConversationID) {
+			if len(set.Reads) >= contract.MaxPolicyTargets {
+				return errors.New("policy target count exceeds v1 bound")
+			}
+			set.Reads = cloneTargets(append(set.Reads, target))
+			changed = true
+		}
+		if kind == Write && !containsTarget(set.Writes, target.ConversationID) {
+			if len(set.Writes) >= contract.MaxPolicyTargets {
+				return errors.New("policy target count exceeds v1 bound")
+			}
+			set.Writes = cloneTargets(append(set.Writes, target))
+			changed = true
+		}
+		if !isSubset(set.Writes, set.Reads) {
+			return ErrWriteNeedsRead
+		}
+		if !changed {
+			result = set
+			return nil
+		}
+		if index >= 0 {
+			file.Sets[index] = set
+		} else {
+			if len(file.Sets) >= contract.MaxProfiles {
+				return errors.New("policy profile count exceeds v1 bound")
+			}
+			file.Sets = append(file.Sets, set)
+		}
+		if err := r.save(file); err != nil {
+			return err
+		}
+		committed = true
+		result = set
+		return nil
+	})
+	if err != nil && committed && !WasCommitted(err) {
+		err = &CommitError{cause: err}
+	}
+	return result, err
+}
+
 // PreviewReplace validates the exact local policy transition without writing.
 func (r *Registry) PreviewReplace(ctx context.Context, p profile.Profile, kind Kind, targets []Target) (Set, error) {
 	if len(targets) > contract.MaxPolicyTargets {
@@ -324,6 +415,25 @@ func cloneTargets(targets []Target) []Target {
 	sort.Slice(result, func(i, j int) bool { return result[i].ConversationID < result[j].ConversationID })
 	return result
 }
+
+func containsTarget(targets []Target, conversationID string) bool {
+	for _, target := range targets {
+		if target.ConversationID == conversationID {
+			return true
+		}
+	}
+	return false
+}
+
+func validateTargetSharedState(targets []Target, candidate Target) error {
+	for _, target := range targets {
+		if target.ConversationID == candidate.ConversationID && target.Shared != candidate.Shared {
+			return ErrSharedMismatch
+		}
+	}
+	return nil
+}
+
 func isSubset(subset, superset []Target) bool {
 	allowed := map[string]slack.SharedStatus{}
 	for _, target := range superset {

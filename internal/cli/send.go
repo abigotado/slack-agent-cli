@@ -92,39 +92,47 @@ func executeSend(ctx context.Context, dependencies Dependencies, options sendOpt
 }
 
 func executeConfirmedSend(ctx context.Context, dependencies Dependencies, options sendOptions, p profile.Profile, text string, receipt intent.Receipt) error {
+	data, meta, err := confirmedSend(ctx, dependencies, options, p, text, receipt)
+	if err != nil {
+		return err
+	}
+	return dependencies.Output.ConfirmedWriteSuccess(data, meta)
+}
+
+func confirmedSend(ctx context.Context, dependencies Dependencies, options sendOptions, p profile.Profile, text string, receipt intent.Receipt) (map[string]any, *output.Meta, error) {
 	if !options.yes || options.confirmation == "" {
-		return errx.New(errx.ConfirmationRequired, "MESSAGE_CONFIRMATION_REQUIRED", "message send requires the exact dry-run intent", "review the receipt, then pass --confirm-intent SHA256 --yes")
+		return nil, nil, errx.New(errx.ConfirmationRequired, "MESSAGE_CONFIRMATION_REQUIRED", "message send requires the exact dry-run intent", "review the receipt, then pass --confirm-intent SHA256 --yes")
 	}
 	if options.confirmation != receipt.IntentSHA256 {
-		return errx.New(errx.Conflict, "INTENT_MISMATCH", "confirmation does not match the current message intent", "repeat dry-run and review the new receipt")
+		return nil, nil, errx.New(errx.Conflict, "INTENT_MISMATCH", "confirmation does not match the current message intent", "repeat dry-run and review the new receipt")
 	}
 	current, err := loadSession(ctx, dependencies, options.profile, profile.CapabilityMessageWrite)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if profile.Identity(current.profile) != receipt.ProfileIdentity || current.profile.CredentialGeneration != receipt.Generation {
-		return errx.New(errx.Conflict, "PROFILE_CHANGED", "profile changed after dry-run", "repeat dry-run and review the new identity")
+		return nil, nil, errx.New(errx.Conflict, "PROFILE_CHANGED", "profile changed after dry-run", "repeat dry-run and review the new identity")
 	}
 	identity, err := dependencies.Auth.AuthTest(ctx, current.token)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if !identityMatchesProfile(p, identity) {
-		return credentialIdentityChanged()
+		return nil, nil, credentialIdentityChanged()
 	}
 	if _, _, err := preflightTarget(ctx, dependencies, current, options.conversationID, policy.Write); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if err := preflightThread(ctx, dependencies, current, options); err != nil {
-		return err
+		return nil, nil, err
 	}
 	result, reconciled, err := dispatchMessage(ctx, dependencies, current, options, text)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	dependencies.WriteState.MarkConfirmed()
 	applied := map[string]any{"conversation_id": result.ConversationID, "ts": result.TS, "thread_ts": result.ThreadTS, "intent_sha256": receipt.IntentSHA256, "applied": true}
-	return dependencies.Output.ConfirmedWriteSuccess(applied, &output.Meta{Profile: p.Name, WorkspaceID: p.WorkspaceID, Reconciled: &reconciled})
+	return applied, &output.Meta{Profile: p.Name, WorkspaceID: p.WorkspaceID, Reconciled: &reconciled}, nil
 }
 
 func preflightThread(ctx context.Context, dependencies Dependencies, current session, options sendOptions) error {
@@ -147,7 +155,7 @@ func dispatchMessage(ctx context.Context, dependencies Dependencies, current ses
 	defer cancel()
 	dependencies.WriteState.MarkStarted()
 	result, writeErr := dependencies.Writes.PostMessage(writeContext, current.token, slack.PostOptions{ConversationID: options.conversationID, ThreadTS: options.threadTS, Text: text})
-	if writeErr == nil && (result.ConversationID != options.conversationID || validateTimestamp(result.TS, "Slack response timestamp") != nil) {
+	if writeErr == nil && (result.ConversationID != options.conversationID || result.ThreadTS != options.threadTS || validateTimestamp(result.TS, "Slack response timestamp") != nil) {
 		writeErr = errx.New(errx.Conflict, "WRITE_OUTCOME_UNKNOWN", "Slack write response identity was incomplete", "reconcile with a bounded read; never retry automatically")
 	}
 	if !isUnknownWrite(writeErr) {
@@ -157,7 +165,7 @@ func dispatchMessage(ctx context.Context, dependencies Dependencies, current ses
 	if !ok {
 		return slack.PostResult{}, false, writeErr
 	}
-	return match, true, nil
+	return slack.PostResult{}, false, errx.New(errx.Conflict, "WRITE_OUTCOME_UNKNOWN", "Slack write outcome remains unknown", "bounded reconciliation found a matching candidate at "+match.TS+"; another client may have created it; inspect the conversation and never resend automatically")
 }
 
 func readMessageText(reader io.Reader) (string, error) {
@@ -190,7 +198,17 @@ func reconcileMessage(ctx context.Context, dependencies Dependencies, current se
 	}
 	matches := make([]slack.Message, 0, 1)
 	digest := intent.DigestText(text)
+	earliest := float64(dispatchedAt.UnixMicro()) / 1e6
+	latest := float64(dispatchedAt.Add(2*time.Minute).UnixMicro()) / 1e6
 	for _, message := range messages {
+		if validateTimestamp(message.TS, "Slack message timestamp") != nil {
+			continue
+		}
+		timestamp, err := strconv.ParseFloat(message.TS, 64)
+		// An older identical message cannot prove that this dispatch was applied.
+		if err != nil || timestamp < earliest || timestamp > latest {
+			continue
+		}
 		authorMatch := message.User == current.profile.UserID || (current.profile.BotID != "" && message.BotID == current.profile.BotID)
 		threadMatch := message.ThreadTS == options.threadTS
 		if options.threadTS == "" {
@@ -211,13 +229,13 @@ func reconciliationMessages(ctx context.Context, dependencies Dependencies, curr
 		oldest := strconv.FormatInt(dispatchedAt.Add(-2*time.Minute).Unix(), 10)
 		latest := strconv.FormatInt(dispatchedAt.Add(2*time.Minute).Unix(), 10)
 		page, err := dependencies.Messages.History(ctx, current.token, slack.HistoryOptions{ConversationID: options.conversationID, Limit: contract.MaxCollectionLimit, Oldest: oldest, Latest: latest})
-		if err != nil {
+		if err != nil || page.NextCursor != "" {
 			return nil, false
 		}
 		return page.Messages, true
 	}
 	page, err := dependencies.Messages.Replies(ctx, current.token, slack.ThreadOptions{ConversationID: options.conversationID, ThreadTS: options.threadTS, Limit: contract.MaxCollectionLimit})
-	if err != nil {
+	if err != nil || page.NextCursor != "" {
 		return nil, false
 	}
 	return page.Messages, true
