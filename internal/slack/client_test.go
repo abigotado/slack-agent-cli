@@ -283,6 +283,88 @@ func TestPostMessageIsOneShotAndDisablesUnfurls(t *testing.T) {
 	}
 }
 
+func TestPostMessageUsesAndValidatesSlackAcknowledgement(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		threadTS   string
+		response   string
+		wantThread string
+		wantError  bool
+	}{
+		{
+			name:     "root message",
+			response: `{"ok":true,"channel":"C1","ts":"1710000000.000001","message":{"ts":"1710000000.000001"}}`,
+		},
+		{
+			name:       "exact thread reply",
+			threadTS:   "1710000000.000001",
+			response:   `{"ok":true,"channel":"C1","ts":"1710000001.000002","message":{"ts":"1710000001.000002","thread_ts":"1710000000.000001"}}`,
+			wantThread: "1710000000.000001",
+		},
+		{
+			name:      "missing thread acknowledgement",
+			threadTS:  "1710000000.000001",
+			response:  `{"ok":true,"channel":"C1","ts":"1710000001.000002","message":{"ts":"1710000001.000002"}}`,
+			wantError: true,
+		},
+		{
+			name:      "wrong thread acknowledgement",
+			threadTS:  "1710000000.000001",
+			response:  `{"ok":true,"channel":"C1","ts":"1710000001.000002","message":{"ts":"1710000001.000002","thread_ts":"1710000000.000099"}}`,
+			wantError: true,
+		},
+		{
+			name:      "unexpected parent on root message",
+			response:  `{"ok":true,"channel":"C1","ts":"1710000001.000002","message":{"ts":"1710000001.000002","thread_ts":"1710000000.000001"}}`,
+			wantError: true,
+		},
+		{
+			name:      "message timestamp differs from envelope",
+			response:  `{"ok":true,"channel":"C1","ts":"1710000001.000002","message":{"ts":"1710000001.000003"}}`,
+			wantError: true,
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.URL.Path != "/api/chat.postMessage" || r.Method != http.MethodPost {
+					t.Fatalf("request %s %s", r.Method, r.URL.Path)
+				}
+				if err := r.ParseForm(); err != nil {
+					t.Fatal(err)
+				}
+				if r.Form.Get("channel") != "C1" || r.Form.Get("thread_ts") != test.threadTS {
+					t.Fatalf("form %v", r.Form)
+				}
+				_, _ = w.Write([]byte(test.response))
+			}))
+			defer server.Close()
+
+			result, err := newTestClient(server.URL, server.Client()).PostMessage(context.Background(), Token("sentinel"), PostOptions{
+				ConversationID: "C1",
+				ThreadTS:       test.threadTS,
+				Text:           "hello",
+			})
+			if test.wantError {
+				if err == nil || errx.As(err).Code != "WRITE_OUTCOME_UNKNOWN" {
+					t.Fatalf("expected unknown write outcome, got result=%+v error=%v", result, err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			} else if result.ConversationID != "C1" || result.ThreadTS != test.wantThread || result.TS == "" {
+				t.Fatalf("unexpected result %+v", result)
+			}
+			if calls != 1 {
+				t.Fatalf("write dispatched %d times", calls)
+			}
+		})
+	}
+}
+
 func TestPostDispatchFailuresRemainOneShotConflicts(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
